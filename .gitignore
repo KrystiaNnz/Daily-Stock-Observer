@@ -1,0 +1,57 @@
+# Build output
+build/
+build-*/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+*.ninja
+.ninja_*
+
+# Qt Creator and IDE state
+.qtcreator/
+*.user
+*.user.*
+*.autosave
+.qmake.stash
+
+# Compiled binaries and object files
+*.exe
+*.dll
+*.lib
+*.a
+*.so
+*.dylib
+*.o
+*.obj
+*.pdb
+*.ilk
+
+# Generated Qt files
+moc_*.cpp
+qrc_*.cpp
+ui_*.h
+
+# Python cache and local environments
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+env/
+
+# Local data, secrets, and temporary files
+*.db
+*.sqlite
+*.sqlite3
+.env
+.env.*
+*.tmp
+*.tmp.*
+*.bak
+*.log
+
+# OS noise
+.DS_Store
+Thumbs.db

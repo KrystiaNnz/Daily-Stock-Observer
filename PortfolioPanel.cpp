@@ -1,0 +1,429 @@
+#include "PortfolioPanel.h"
+#include "AddAssetDialog.h"
+#include "DatabaseManager.h"
+#include "CompanyAnalysisPanel.h"
+#include "PeersPanel.h"
+
+#include <QTableWidget>
+#include <QTableWidgetItem>
+#include <QHeaderView>
+#include <QLabel>
+#include <QPushButton>
+#include <QComboBox>
+#include <QVBoxLayout>
+#include <QHBoxLayout>
+#include <QMessageBox>
+#include <QColor>
+#include <QSet>
+#include <QSplitter>
+#include <QTabWidget>
+
+// ── Pomocnicze: item tylko do odczytu ─────────────────
+static QTableWidgetItem* roItem(const QString& text)
+{
+    auto* it = new QTableWidgetItem(text);
+    it->setFlags(it->flags() & ~Qt::ItemIsEditable);
+    return it;
+}
+
+static QTableWidgetItem* roItemNum(double val, int decimals = 2)
+{
+    auto* it = new QTableWidgetItem(QString::number(val, 'f', decimals));
+    it->setFlags(it->flags() & ~Qt::ItemIsEditable);
+    it->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    return it;
+}
+
+// ══════════════════════════════════════════════════════
+// PortfolioPanel
+// ══════════════════════════════════════════════════════
+
+PortfolioPanel::PortfolioPanel(QWidget* parent)
+    : QWidget(parent), m_fetcher(this)
+{
+    setupUi();
+
+    connect(&m_fetcher, &PortfolioFetcher::fetchFinished,
+            this, &PortfolioPanel::onFetchFinished);
+    connect(&m_fetcher, &PortfolioFetcher::fetchError,
+            this, &PortfolioPanel::onFetchError);
+}
+
+void PortfolioPanel::setupUi()
+{
+    auto* root = new QVBoxLayout(this);
+    root->setContentsMargins(16, 16, 16, 12);
+    root->setSpacing(10);
+
+    // ── Pasek narzędziowy ─────────────────────────────
+    auto* toolbar = new QHBoxLayout();
+    toolbar->setSpacing(8);
+
+    auto* title = new QLabel("Portfel inwestycyjny", this);
+    title->setStyleSheet("font-size: 18px; font-weight: bold;");
+    toolbar->addWidget(title);
+    toolbar->addStretch();
+
+    m_statusLabel = new QLabel("Brak danych", this);
+    m_statusLabel->setStyleSheet("color: #999; font-size: 12px;");
+    toolbar->addWidget(m_statusLabel);
+
+    // ── Filtr kategorii ───────────────────────────────
+    m_filterCombo = new QComboBox(this);
+    m_filterCombo->addItem("Wszystkie kategorie");
+    m_filterCombo->setMinimumWidth(200);
+    toolbar->addWidget(m_filterCombo);
+
+    m_refreshBtn = new QPushButton("Odśwież kursy", this);
+    m_deleteBtn  = new QPushButton("Usuń zaznaczone", this);
+    m_addBtn     = new QPushButton("+ Dodaj aktywo", this);
+
+    m_deleteBtn->setEnabled(false);
+
+    m_addBtn->setStyleSheet(
+        "QPushButton { background: #3b82f6; color: white; border: none;"
+        " border-radius: 6px; padding: 7px 14px; font-weight: bold; }"
+        "QPushButton:hover { background: #2563eb; }"
+        "QPushButton:pressed { background: #1d4ed8; }");
+
+    m_deleteBtn->setStyleSheet(
+        "QPushButton { color: #e53e3e; border: 1.5px solid #e53e3e;"
+        " border-radius: 6px; padding: 7px 14px; background: white; }"
+        "QPushButton:hover { background: #fff5f5; }"
+        "QPushButton:disabled { color: #aaa; border-color: #ccc; }");
+
+    toolbar->addWidget(m_refreshBtn);
+    toolbar->addWidget(m_deleteBtn);
+    toolbar->addWidget(m_addBtn);
+
+    root->addLayout(toolbar);
+
+    // ── Tabela ────────────────────────────────────────
+    m_table = new QTableWidget(0, ColCount, this);
+    m_table->setHorizontalHeaderLabels({
+        "Ticker", "Nazwa", "Kategoria", "Ilość", "Cena zakupu",
+        "Kurs live", "Wartość", "P&L (PLN)", "P&L (%)"
+    });
+
+    m_table->horizontalHeader()->setSectionResizeMode(Nazwa,      QHeaderView::Stretch);
+    m_table->horizontalHeader()->setSectionResizeMode(Kategoria,  QHeaderView::ResizeToContents);
+    m_table->horizontalHeader()->setSectionResizeMode(Ticker,     QHeaderView::ResizeToContents);
+    m_table->horizontalHeader()->setSectionResizeMode(Ilosc,      QHeaderView::ResizeToContents);
+    m_table->horizontalHeader()->setDefaultAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+
+    m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
+    m_table->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    m_table->setSortingEnabled(true);
+    m_table->setAlternatingRowColors(true);
+    m_table->verticalHeader()->setVisible(false);
+    m_table->setShowGrid(true);
+
+    // ── Dolny panel: zakładki Analiza / Mapa Rynku ───────
+    m_analysisPanel = new CompanyAnalysisPanel(this);
+    m_peersPanel    = new PeersPanel(this);
+
+    m_bottomTabs = new QTabWidget(this);
+    m_bottomTabs->setTabPosition(QTabWidget::North);
+    m_bottomTabs->setDocumentMode(true);
+    m_bottomTabs->addTab(m_analysisPanel, "Analiza spółki");
+    m_bottomTabs->addTab(m_peersPanel,    "Mapa Rynku");
+
+    // ── Splitter: tabela (góra) + zakładki (dół) ─────────
+    m_splitter = new QSplitter(Qt::Vertical, this);
+    m_splitter->setHandleWidth(4);
+    m_splitter->addWidget(m_table);
+    m_splitter->addWidget(m_bottomTabs);
+    m_splitter->setStretchFactor(0, 3);
+    m_splitter->setStretchFactor(1, 2);
+    m_splitter->setSizes({300, 250});
+
+    root->addWidget(m_splitter, 1);
+
+    // ── Podsumowanie ──────────────────────────────────
+    m_summaryLabel = new QLabel(this);
+    m_summaryLabel->setStyleSheet("font-size: 13px; color: #444; padding: 4px 0;");
+    root->addWidget(m_summaryLabel);
+
+    // ── Połączenia ────────────────────────────────────
+    connect(m_addBtn,     &QPushButton::clicked, this, &PortfolioPanel::onAddAsset);
+    connect(m_deleteBtn,  &QPushButton::clicked, this, &PortfolioPanel::onDeleteAsset);
+    connect(m_refreshBtn, &QPushButton::clicked, this, &PortfolioPanel::onRefreshPrices);
+    connect(m_filterCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, &PortfolioPanel::onFilterChanged);
+    connect(m_table->selectionModel(), &QItemSelectionModel::selectionChanged,
+            this, &PortfolioPanel::onSelectionChanged);
+}
+
+// ── Dane ──────────────────────────────────────────────
+
+void PortfolioPanel::refreshTable()
+{
+    m_table->setSortingEnabled(false);
+    m_table->setRowCount(0);
+
+    const QList<PortfolioAsset> assets = DatabaseManager::instance().getAllAssets();
+
+    for (const PortfolioAsset& a : assets) {
+        int row = m_table->rowCount();
+        m_table->insertRow(row);
+
+        m_table->setItem(row, Ticker,     roItem(a.ticker));
+        m_table->setItem(row, Nazwa,      roItem(a.name));
+        m_table->setItem(row, Kategoria,  roItem(a.category));
+        m_table->setItem(row, Ilosc,      roItemNum(a.quantity, 4));
+        m_table->setItem(row, CenaZakupu, roItemNum(a.avgBuyPrice, 4));
+        m_table->setItem(row, KursLive,   roItem("—"));
+        m_table->setItem(row, Wartosc,    roItem("—"));
+        m_table->setItem(row, PnlPln,     roItem("—"));
+        m_table->setItem(row, PnlPct,     roItem("—"));
+
+        // Przechowaj asset.id i walutę zakupu w tickerze
+        m_table->item(row, Ticker)->setData(Qt::UserRole,     a.id);
+        m_table->item(row, Ticker)->setData(Qt::UserRole + 1, a.currency);
+    }
+
+    m_table->setSortingEnabled(true);
+    rebuildFilterCombo();
+    applyFilter();
+    updateSummary();
+
+    // Pobierz kursy jeśli cache jest nieaktualny
+    if (!m_fetcher.isCacheValid() && m_table->rowCount() > 0)
+        onRefreshPrices();
+    else if (m_fetcher.isCacheValid())
+        applyLivePrices(m_fetcher.cachedQuotes());
+}
+
+void PortfolioPanel::onAddAsset()
+{
+    AddAssetDialog dlg(this);
+    if (dlg.exec() != QDialog::Accepted) return;
+
+    PortfolioAsset      asset = dlg.getAsset();
+    PortfolioTransaction tx   = dlg.getTransaction();
+
+    if (!DatabaseManager::instance().addAsset(asset)) {
+        QMessageBox::warning(this, "Błąd",
+            "Nie udało się dodać aktywa.\n"
+            "Ticker " + asset.ticker + " może już istnieć w portfelu.");
+        return;
+    }
+    DatabaseManager::instance().addTransaction(tx);
+
+    refreshTable();
+}
+
+void PortfolioPanel::onDeleteAsset()
+{
+    int row = m_table->currentRow();
+    if (row < 0) return;
+
+    QString ticker = m_table->item(row, Ticker)->text();
+    int     id     = m_table->item(row, Ticker)->data(Qt::UserRole).toInt();
+
+    auto reply = QMessageBox::question(this, "Usuń aktywo",
+        "Czy na pewno chcesz usunąć " + ticker + " z portfela?\n"
+        "Historia transakcji zostanie zachowana.",
+        QMessageBox::Yes | QMessageBox::No);
+
+    if (reply == QMessageBox::Yes) {
+        DatabaseManager::instance().deleteAsset(id);
+        refreshTable();
+    }
+}
+
+void PortfolioPanel::onRefreshPrices()
+{
+    if (m_fetcher.isFetching()) return;
+
+    QStringList tickers;
+    for (int r = 0; r < m_table->rowCount(); ++r) {
+        QString ticker   = m_table->item(r, Ticker)->text();
+        QString currency = m_table->item(r, Ticker)->data(Qt::UserRole + 1).toString();
+        tickers << (currency.isEmpty() ? ticker : ticker + ":" + currency);
+    }
+
+    if (tickers.isEmpty()) return;
+
+    setRefreshing(true);
+    m_fetcher.fetchPrices(tickers);
+}
+
+void PortfolioPanel::onFetchFinished(const QMap<QString, PortfolioQuote>& quotes)
+{
+    setRefreshing(false);
+    applyLivePrices(quotes);
+
+    if (!quotes.isEmpty()) {
+        QString ts = quotes.first().timestamp;
+        m_statusLabel->setText("Kurs z: " + ts.replace("T", " ").left(16));
+        m_statusLabel->setStyleSheet("color: #666; font-size: 12px;");
+    }
+}
+
+void PortfolioPanel::onFetchError(const QString& message)
+{
+    setRefreshing(false);
+    m_statusLabel->setText("Błąd: " + message);
+    m_statusLabel->setStyleSheet("color: #e53e3e; font-size: 12px;");
+}
+
+void PortfolioPanel::onSelectionChanged()
+{
+    int row = m_table->currentRow();
+    m_deleteBtn->setEnabled(row >= 0);
+
+    if (row >= 0 && !m_table->isRowHidden(row)) {
+        QString ticker = m_table->item(row, Ticker)->text();
+        if (!ticker.isEmpty()) {
+            m_analysisPanel->loadCompany(ticker);
+            m_peersPanel->loadPeers(ticker);
+        }
+    } else {
+        m_analysisPanel->clear();
+        m_peersPanel->clear();
+    }
+}
+
+// ── Prywatne ─────────────────────────────────────────
+
+void PortfolioPanel::applyLivePrices(const QMap<QString, PortfolioQuote>& quotes)
+{
+    m_table->setSortingEnabled(false);
+
+    for (int r = 0; r < m_table->rowCount(); ++r) {
+        QString ticker = m_table->item(r, Ticker)->text();
+        if (!quotes.contains(ticker)) continue;
+
+        const PortfolioQuote& q = quotes[ticker];
+        if (!q.valid) {
+            m_table->item(r, KursLive)->setText("N/A");
+            continue;
+        }
+
+        double qty      = m_table->item(r, Ilosc)->text().toDouble();
+        double buyPrice = m_table->item(r, CenaZakupu)->text().toDouble();
+        double livePrice = (q.priceConverted > 0) ? q.priceConverted : q.price;
+        double value    = qty * livePrice;
+        double pnlPln   = (livePrice - buyPrice) * qty;
+        double pnlPct   = (buyPrice > 0) ? (livePrice - buyPrice) / buyPrice * 100.0 : 0.0;
+
+        // Aktualizuj nazwę jeśli była pusta
+        if (m_table->item(r, Nazwa)->text().isEmpty() && !q.name.isEmpty())
+            m_table->item(r, Nazwa)->setText(q.name);
+
+        QString kursTxt = QString::number(livePrice, 'f', 4);
+        if (q.liveCurrency != q.currency && !q.liveCurrency.isEmpty())
+            kursTxt += QString(" (%1→%2 %3)")
+                .arg(q.liveCurrency).arg(q.currency)
+                .arg(QString::number(q.exchangeRate, 'f', 4));
+        auto* kursItem = new QTableWidgetItem(kursTxt);
+        kursItem->setFlags(kursItem->flags() & ~Qt::ItemIsEditable);
+        kursItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        m_table->setItem(r, KursLive, kursItem);
+        m_table->setItem(r, Wartosc,  roItemNum(value,   2));
+        m_table->setItem(r, PnlPln,   roItemNum(pnlPln,  2));
+        m_table->setItem(r, PnlPct,   roItemNum(pnlPct,  2));
+
+        // Kolorowanie P&L
+        QColor pnlColor = (pnlPln >= 0) ? QColor("#15803d") : QColor("#b91c1c");
+        m_table->item(r, PnlPln)->setForeground(pnlColor);
+        m_table->item(r, PnlPct)->setForeground(pnlColor);
+    }
+
+    m_table->setSortingEnabled(true);
+    updateSummary();
+}
+
+void PortfolioPanel::updateSummary()
+{
+    double totalValue = 0.0;
+    double totalPnl   = 0.0;
+    bool   hasLive    = false;
+
+    for (int r = 0; r < m_table->rowCount(); ++r) {
+        QString valStr = m_table->item(r, Wartosc)->text();
+        QString pnlStr = m_table->item(r, PnlPln)->text();
+        if (valStr == "—" || valStr == "N/A") continue;
+        hasLive    = true;
+        totalValue += valStr.toDouble();
+        totalPnl   += pnlStr.toDouble();
+    }
+
+    if (!hasLive || m_table->rowCount() == 0) {
+        m_summaryLabel->setText(
+            QString("Aktywa: %1").arg(m_table->rowCount()));
+        return;
+    }
+
+    double totalCost = totalValue - totalPnl;
+    double pnlPct    = (totalCost > 0) ? (totalPnl / totalCost * 100.0) : 0.0;
+
+    QString pnlSign  = (totalPnl >= 0) ? "+" : "";
+    QString pnlColor = (totalPnl >= 0) ? "#15803d" : "#b91c1c";
+
+    m_summaryLabel->setText(
+        QString("Aktywa: %1  |  Wartość portfela: <b>%2 PLN</b>  |  "
+                "P&amp;L: <span style='color:%3'><b>%4%5 PLN (%6%7%)</b></span>")
+        .arg(m_table->rowCount())
+        .arg(QString::number(totalValue, 'f', 2))
+        .arg(pnlColor)
+        .arg(pnlSign)
+        .arg(QString::number(totalPnl, 'f', 2))
+        .arg(pnlSign)
+        .arg(QString::number(pnlPct, 'f', 2)));
+    m_summaryLabel->setTextFormat(Qt::RichText);
+}
+
+void PortfolioPanel::setRefreshing(bool active)
+{
+    m_refreshBtn->setEnabled(!active);
+    m_refreshBtn->setText(active ? "Pobieranie..." : "Odśwież kursy");
+    if (active) {
+        m_statusLabel->setText("Pobieranie kursów...");
+        m_statusLabel->setStyleSheet("color: #3b82f6; font-size: 12px;");
+    }
+}
+
+void PortfolioPanel::rebuildFilterCombo()
+{
+    QString current = m_filterCombo->currentText();
+
+    // Zbierz unikalne kategorie z tabeli
+    QSet<QString> cats;
+    for (int r = 0; r < m_table->rowCount(); ++r) {
+        QString cat = m_table->item(r, Kategoria)->text().trimmed();
+        if (!cat.isEmpty())
+            cats.insert(cat);
+    }
+
+    m_filterCombo->blockSignals(true);
+    m_filterCombo->clear();
+    m_filterCombo->addItem("Wszystkie kategorie");
+    QStringList sorted = QStringList(cats.begin(), cats.end());
+    sorted.sort();
+    m_filterCombo->addItems(sorted);
+
+    int idx = m_filterCombo->findText(current);
+    m_filterCombo->setCurrentIndex(idx >= 0 ? idx : 0);
+    m_filterCombo->blockSignals(false);
+}
+
+void PortfolioPanel::applyFilter()
+{
+    QString filter = m_filterCombo->currentText();
+    bool showAll   = (filter == "Wszystkie kategorie" || m_filterCombo->currentIndex() == 0);
+
+    for (int r = 0; r < m_table->rowCount(); ++r) {
+        bool match = showAll ||
+                     m_table->item(r, Kategoria)->text().trimmed() == filter;
+        m_table->setRowHidden(r, !match);
+    }
+    updateSummary();
+}
+
+void PortfolioPanel::onFilterChanged()
+{
+    applyFilter();
+}
