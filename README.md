@@ -10,12 +10,15 @@ Work in progress. The core desktop structure is implemented and several modules 
 
 Implemented:
 
+- Main hub panel with dashboard metrics and quick navigation to the major modules
+- Basic XP/level/streak system in the main hub, driven by completed goal steps and calculator exercises
 - Daily calendar with event CRUD backed by SQLite
 - Goal tracking with steps, progress, long-term goals, and editable goal cards
 - Customizable color and display settings stored locally
 - Portfolio panel with asset tracking and live quote fetching through Python/yfinance
 - Modular Qt widgets for calendar, planner, goals, portfolio, and map views
 - Custom Qt world map panel with tile loading, pan/zoom, country search, country borders, administrative regions, and local data source metadata
+- Financial calculator panel backed by a Python helper script for nominal and real investment return calculations, with an initial bridge for loading purchase-price data from portfolio assets
 
 Planned:
 
@@ -42,11 +45,13 @@ The app is organized around a Qt Widgets desktop shell with separate classes for
 Key components:
 
 - `MainWindow` - main application window and navigation
+- `MainHubPanel` - dashboard-style application hub with quick module access
 - `DatabaseManager` - SQLite access layer and application persistence
 - `CalendarView` - calendar and daily event list
 - `PlannerView` - time-slot planner view
 - `GoalsPanel` and `GoalsListView` - goal tracking UI
 - `PortfolioPanel` and `PortfolioFetcher` - portfolio table and live quote fetching
+- `FinancialCalculatorPanel` - finance calculator UI backed by `python/financial_calculator.py`
 - `MapPanel` and `TileManager` - custom map rendering and map tile loading
 - `CountryData`, `CountryBorders`, `CountrySubdivisions`, and `LocalDataSources` - local map metadata loaders
 - `CountryInfoDialog` and `RegionInfoDialog` - non-modal information dialogs for map selections
@@ -92,6 +97,14 @@ Examples:
 
 - `portfolio.py` fetches live market quotes
 - `search.py` searches tickers
+- `financial_calculator.py` calculates investment return, stock return with dividends, and real return after inflation
+- `financial_calculator.py exercise <department>` generates finance practice tasks with XP rewards scaled by difficulty; the UI shows `MATEMATYKA FINANSOWA`, `INSTRUMENTY DLUZNE`, `TECHNIKI NOTOWAN GIELDOWYCH`, `INSTRUMENTY POCHODNE`, `ANALIZA PORTFELOWA`, and `ANALIZA WSKAZNIKOWA I RACHUNKOWOSC` mixes by default and can expand into concrete task types
+- The debt-instruments mix starts with loan installments, zero-coupon bonds, coupon bond pricing, YTM, Macaulay duration, modified duration, and convexity
+- The exchange-trading-techniques mix starts with fixing price, theoretical fixing volume, continuous-trading execution price, and tick-size validation
+- The derivatives mix starts with forward payoff, option payoff, protective put, put-call parity, and delta exercises
+- The portfolio-analysis mix starts with expected return, two-asset portfolio risk, beta, CAPM, WACC, Sharpe, Treynor, and Jensen alpha exercises
+- The ratio-accounting mix starts with activity ratios, DuPont profitability ratios, gross margin, Gordon model, leverage, and ROC/debt-cost exercises
+- Generated numeric exercises randomly require either A/B/C/D selection or direct numeric input
 - `analysis.py`, `crypto.py`, and `forecast.py` are placeholders or early-stage modules
 - JSON files provide map borders, administrative regions, and local data source metadata
 

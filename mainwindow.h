@@ -13,6 +13,8 @@ class QStackedWidget;
 class GoalsPanel;
 class PortfolioPanel;
 class MapPanel;
+class FinancialCalculatorPanel;
+class MainHubPanel;
 
 class MainWindow : public QMainWindow
 {
@@ -53,9 +55,11 @@ private:
     QPushButton*     m_addBtn        = nullptr;
     QPushButton*     m_deleteBtn     = nullptr;
     QPushButton*     m_settingsBtn   = nullptr;
+    MainHubPanel*    m_mainHubPanel  = nullptr;
     GoalsPanel*      m_goalsPanel    = nullptr;
     PortfolioPanel*  m_portfolioPanel = nullptr;
     MapPanel*        m_mapPanel       = nullptr;
+    FinancialCalculatorPanel* m_calculatorPanel = nullptr;
 
     QDate           m_selectedDate;
     AppColors       m_colors;

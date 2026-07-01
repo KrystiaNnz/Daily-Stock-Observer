@@ -6,6 +6,8 @@
 #include <QDir>
 #include <QDebug>
 #include <QDateTime>
+#include <QSet>
+#include <QtMath>
 
 DatabaseManager& DatabaseManager::instance()
 {
@@ -74,6 +76,49 @@ bool DatabaseManager::init()
         )
     )")) {
         qDebug() << "Błąd tabeli steps:" << q.lastError().text();
+        return false;
+    }
+
+    if (!q.exec(R"(
+        CREATE TABLE IF NOT EXISTS xp_profile (
+            id          INTEGER PRIMARY KEY CHECK (id = 1),
+            total_xp    INTEGER NOT NULL DEFAULT 0,
+            updated_at  TEXT    DEFAULT CURRENT_TIMESTAMP
+        )
+    )")) {
+        qDebug() << "Błąd tabeli xp_profile:" << q.lastError().text();
+        return false;
+    }
+
+    if (!q.exec("INSERT OR IGNORE INTO xp_profile (id, total_xp) VALUES (1, 0)")) {
+        qDebug() << "Błąd inicjalizacji xp_profile:" << q.lastError().text();
+        return false;
+    }
+
+    if (!q.exec(R"(
+        CREATE TABLE IF NOT EXISTS xp_events (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            step_id     INTEGER NOT NULL UNIQUE,
+            xp          INTEGER NOT NULL,
+            reason      TEXT,
+            awarded_at  TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (step_id) REFERENCES steps(id) ON DELETE CASCADE
+        )
+    )")) {
+        qDebug() << "Błąd tabeli xp_events:" << q.lastError().text();
+        return false;
+    }
+
+    if (!q.exec(R"(
+        CREATE TABLE IF NOT EXISTS xp_activity_events (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            source      TEXT    NOT NULL,
+            xp          INTEGER NOT NULL,
+            reference   TEXT,
+            awarded_at  TEXT    DEFAULT CURRENT_TIMESTAMP
+        )
+    )")) {
+        qDebug() << "Błąd tabeli xp_activity_events:" << q.lastError().text();
         return false;
     }
 
@@ -364,6 +409,13 @@ bool DatabaseManager::addStep(Step& step)
 
 bool DatabaseManager::toggleStep(int stepId, bool done)
 {
+    bool wasDone = false;
+    QSqlQuery before;
+    before.prepare("SELECT done FROM steps WHERE id = :id");
+    before.bindValue(":id", stepId);
+    if (before.exec() && before.next())
+        wasDone = before.value(0).toBool();
+
     QSqlQuery q;
     if (done) {
         q.prepare("UPDATE steps SET done = 1, done_at = :dt WHERE id = :id");
@@ -377,7 +429,132 @@ bool DatabaseManager::toggleStep(int stepId, bool done)
         qDebug() << "Błąd toggle kroku:" << q.lastError().text();
         return false;
     }
+    if (done && !wasDone)
+        awardExperienceForStep(stepId);
     return true;
+}
+
+int DatabaseManager::xpForLevel(int level) const
+{
+    if (level <= 1)
+        return 100;
+    return qRound(100.0 * qPow(1.35, level - 1));
+}
+
+bool DatabaseManager::awardExperienceForStep(int stepId)
+{
+    constexpr int xpPerStep = 25;
+
+    QSqlQuery event;
+    event.prepare("INSERT OR IGNORE INTO xp_events (step_id, xp, reason, awarded_at) "
+                  "VALUES (:step_id, :xp, :reason, :awarded_at)");
+    event.bindValue(":step_id", stepId);
+    event.bindValue(":xp", xpPerStep);
+    event.bindValue(":reason", "step_completed");
+    event.bindValue(":awarded_at", QDateTime::currentDateTime().toString("yyyy-MM-ddTHH:mm:ss"));
+
+    if (!event.exec()) {
+        qDebug() << "Błąd dodawania xp_event:" << event.lastError().text();
+        return false;
+    }
+    if (event.numRowsAffected() == 0)
+        return true;
+
+    QSqlQuery profile;
+    profile.prepare("UPDATE xp_profile SET total_xp = total_xp + :xp, "
+                    "updated_at = :updated WHERE id = 1");
+    profile.bindValue(":xp", xpPerStep);
+    profile.bindValue(":updated", QDateTime::currentDateTime().toString("yyyy-MM-ddTHH:mm:ss"));
+    if (!profile.exec()) {
+        qDebug() << "Błąd aktualizacji XP:" << profile.lastError().text();
+        return false;
+    }
+    return true;
+}
+
+bool DatabaseManager::awardExperience(const QString& source, int xp, const QString& reference)
+{
+    if (xp <= 0)
+        return false;
+
+    const QString now = QDateTime::currentDateTime().toString("yyyy-MM-ddTHH:mm:ss");
+
+    QSqlQuery event;
+    event.prepare("INSERT INTO xp_activity_events (source, xp, reference, awarded_at) "
+                  "VALUES (:source, :xp, :reference, :awarded_at)");
+    event.bindValue(":source", source);
+    event.bindValue(":xp", xp);
+    event.bindValue(":reference", reference);
+    event.bindValue(":awarded_at", now);
+    if (!event.exec()) {
+        qDebug() << "Błąd dodawania xp_activity_event:" << event.lastError().text();
+        return false;
+    }
+
+    QSqlQuery profile;
+    profile.prepare("UPDATE xp_profile SET total_xp = total_xp + :xp, "
+                    "updated_at = :updated WHERE id = 1");
+    profile.bindValue(":xp", xp);
+    profile.bindValue(":updated", now);
+    if (!profile.exec()) {
+        qDebug() << "Błąd aktualizacji XP:" << profile.lastError().text();
+        return false;
+    }
+    return true;
+}
+
+int DatabaseManager::calculateStreakDays()
+{
+    QSet<QString> dates;
+    QSqlQuery q;
+    if (!q.exec("SELECT DISTINCT substr(done_at, 1, 10) FROM steps "
+                "WHERE done = 1 AND done_at IS NOT NULL AND done_at != ''")) {
+        qDebug() << "Błąd streak query:" << q.lastError().text();
+        return 0;
+    }
+
+    while (q.next())
+        dates.insert(q.value(0).toString());
+
+    int streak = 0;
+    QDate cursor = QDate::currentDate();
+    while (dates.contains(cursor.toString("yyyy-MM-dd"))) {
+        ++streak;
+        cursor = cursor.addDays(-1);
+    }
+    return streak;
+}
+
+ExperienceProfile DatabaseManager::getExperienceProfile()
+{
+    ExperienceProfile profile;
+
+    QSqlQuery q;
+    if (q.exec("SELECT total_xp FROM xp_profile WHERE id = 1") && q.next())
+        profile.totalXp = q.value(0).toInt();
+
+    int remaining = profile.totalXp;
+    int level = 1;
+    int threshold = xpForLevel(level);
+    while (remaining >= threshold) {
+        remaining -= threshold;
+        ++level;
+        threshold = xpForLevel(level);
+    }
+
+    profile.level = level;
+    profile.xpIntoLevel = remaining;
+    profile.xpForNextLevel = threshold;
+    profile.streakDays = calculateStreakDays();
+
+    QSqlQuery today;
+    today.prepare("SELECT COUNT(*) FROM steps "
+                  "WHERE done = 1 AND substr(done_at, 1, 10) = :today");
+    today.bindValue(":today", QDate::currentDate().toString("yyyy-MM-dd"));
+    if (today.exec() && today.next())
+        profile.completedStepsToday = today.value(0).toInt();
+
+    return profile;
 }
 
 bool DatabaseManager::deleteStep(int stepId)

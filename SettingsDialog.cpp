@@ -86,6 +86,15 @@ void SettingsDialog::resetToDefaults()
     applyBtnStyle(m_bgBtn, m_colors.appBg);
     m_bgHex->setText(m_colors.appBg.name().toUpper());
 
+    applyBtnStyle(m_surfaceBtn, m_colors.surface);
+    m_surfaceHex->setText(m_colors.surface.name().toUpper());
+
+    applyBtnStyle(m_borderBtn, m_colors.border);
+    m_borderHex->setText(m_colors.border.name().toUpper());
+
+    applyBtnStyle(m_textBtn, m_colors.text);
+    m_textHex->setText(m_colors.text.name().toUpper());
+
     m_patternGroup->button(static_cast<int>(PatternType::None))->setChecked(true);
     m_colors.patternMark = PatternGen::autoMark(m_colors.leftPanel);
     applyBtnStyle(m_patternMarkBtn, m_colors.patternMark);
@@ -127,6 +136,45 @@ void SettingsDialog::setupUi()
     addColorRow(form, "Kolor akcentu", &m_colors.accent,    m_accentBtn, m_accentHex);
     addColorRow(form, "Lewy panel",    &m_colors.leftPanel,  m_leftBtn,   m_leftHex);
     addColorRow(form, "Tło aplikacji", &m_colors.appBg,      m_bgBtn,     m_bgHex);
+
+    addColorRow(form, "Powierzchnie",   &m_colors.surface,    m_surfaceBtn, m_surfaceHex);
+    addColorRow(form, "Obramowania",    &m_colors.border,     m_borderBtn,  m_borderHex);
+    addColorRow(form, "Tekst",          &m_colors.text,       m_textBtn,    m_textHex);
+
+    auto* notarityBtn = new QPushButton("Preset Notarity", this);
+    notarityBtn->setCursor(Qt::PointingHandCursor);
+    notarityBtn->setStyleSheet(
+        "QPushButton { background: #3a2d97; color: white; border: none;"
+        " border-radius: 6px; padding: 7px 12px; font-weight: 600; }"
+        "QPushButton:hover { background: #2f247d; }");
+    form->addRow("", notarityBtn);
+    connect(notarityBtn, &QPushButton::clicked, this, [this]() {
+        m_colors.accent = QColor("#3a2d97");
+        m_colors.leftPanel = QColor("#d8e1e6");
+        m_colors.appBg = QColor("#f5f5f6");
+        m_colors.surface = QColor("#f5f5f6");
+        m_colors.border = QColor("#d3d7dd");
+        m_colors.text = QColor("#000000");
+        m_colors.pattern = PatternType::None;
+        m_colors.patternMark = QColor("#adadc2");
+
+        applyBtnStyle(m_accentBtn, m_colors.accent);
+        m_accentHex->setText(m_colors.accent.name().toUpper());
+        applyBtnStyle(m_leftBtn, m_colors.leftPanel);
+        m_leftHex->setText(m_colors.leftPanel.name().toUpper());
+        applyBtnStyle(m_bgBtn, m_colors.appBg);
+        m_bgHex->setText(m_colors.appBg.name().toUpper());
+        applyBtnStyle(m_surfaceBtn, m_colors.surface);
+        m_surfaceHex->setText(m_colors.surface.name().toUpper());
+        applyBtnStyle(m_borderBtn, m_colors.border);
+        m_borderHex->setText(m_colors.border.name().toUpper());
+        applyBtnStyle(m_textBtn, m_colors.text);
+        m_textHex->setText(m_colors.text.name().toUpper());
+        applyBtnStyle(m_patternMarkBtn, m_colors.patternMark);
+        m_patternMarkHex->setText(m_colors.patternMark.name().toUpper());
+        if (m_patternGroup && m_patternGroup->button(static_cast<int>(PatternType::None)))
+            m_patternGroup->button(static_cast<int>(PatternType::None))->setChecked(true);
+    });
 
     main->addWidget(colorGroup);
 

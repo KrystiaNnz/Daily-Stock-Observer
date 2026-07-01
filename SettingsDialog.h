@@ -14,12 +14,14 @@ class QButtonGroup;
 
 // ── Kolory aplikacji ───────────────────────────────────────────────
 struct AppColors {
-    QColor      accent      { "#3a7bd5" };
-    QColor      leftPanel   { "#1e2a3a" };
-    QColor      appBg       { "#f8f9fb" };
-    QColor      dialogText  { "#1a2535" };  // kolor tekstu w oknach dialogowych
+    QColor      accent      { "#3a2d97" };
+    QColor      leftPanel   { "#d8e1e6" };
+    QColor      appBg       { "#f5f5f6" };
+    QColor      surface     { "#f5f5f6" };
+    QColor      border      { "#d3d7dd" };
+    QColor      text        { "#000000" };
     PatternType pattern     { PatternType::None };
-    QColor      patternMark {};   // invalid = auto-derive from leftPanel
+    QColor      patternMark { "#adadc2" };   // invalid = auto-derive from leftPanel
 
     static AppColors defaults() { return {}; }
 };
@@ -69,8 +71,12 @@ private:
     QLabel*      m_leftHex   = nullptr;
     QPushButton* m_bgBtn     = nullptr;
     QLabel*      m_bgHex     = nullptr;
-    QPushButton* m_textBtn   = nullptr;
-    QLabel*      m_textHex   = nullptr;
+    QPushButton* m_surfaceBtn = nullptr;
+    QLabel*      m_surfaceHex = nullptr;
+    QPushButton* m_borderBtn  = nullptr;
+    QLabel*      m_borderHex  = nullptr;
+    QPushButton* m_textBtn    = nullptr;
+    QLabel*      m_textHex    = nullptr;
 
     // Wzory
     QButtonGroup* m_patternGroup       = nullptr;

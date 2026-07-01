@@ -61,10 +61,20 @@ qt_add_executable(DailyStockObserver
     CountryInfoDialog.cpp
     RegionInfoDialog.h
     RegionInfoDialog.cpp
+    FinancialCalculatorPanel.h
+    FinancialCalculatorPanel.cpp
+    MainHubPanel.h
+    MainHubPanel.cpp
     resources.qrc
 )
 
 target_link_libraries(DailyStockObserver PRIVATE Qt6::Widgets Qt6::Sql Qt6::Network)
+
+add_custom_command(TARGET DailyStockObserver POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        ${CMAKE_SOURCE_DIR}/python
+        $<TARGET_FILE_DIR:DailyStockObserver>/python
+)
 
 set_target_properties(DailyStockObserver PROPERTIES
     WIN32_EXECUTABLE TRUE

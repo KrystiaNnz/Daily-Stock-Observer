@@ -6,6 +6,8 @@
 #include "GoalsPanel.h"
 #include "PortfolioPanel.h"
 #include "MapPanel.h"
+#include "FinancialCalculatorPanel.h"
+#include "MainHubPanel.h"
 
 #include <QCalendarWidget>
 #include <QListWidget>
@@ -21,6 +23,15 @@
 #include <QFont>
 #include <QCoreApplication>
 #include <QSettings>
+
+namespace {
+constexpr int TabHome = 0;
+constexpr int TabPlanner = 1;
+constexpr int TabGoals = 2;
+constexpr int TabPortfolio = 3;
+constexpr int TabMap = 4;
+constexpr int TabCalculator = 5;
+}
 
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
@@ -70,7 +81,7 @@ void MainWindow::setupUi()
     tabLayout->addWidget(appTitle);
     tabLayout->addSpacing(20);
 
-    const QList<QString> tabLabels = {"📅  Planer", "🎯  Cele", "📈  Portfel", "🗺  Mapa"};
+    const QList<QString> tabLabels = {"Główny", "📅  Planer", "🎯  Cele", "📈  Portfel", "🗺  Mapa", "Kalkulator"};
     for (int i = 0; i < tabLabels.size(); ++i) {
         auto* btn = new QPushButton(tabLabels[i], this);
         btn->setObjectName("tabBtn");
@@ -99,7 +110,10 @@ void MainWindow::setupUi()
     m_stack->setObjectName("mainStack");
     rootLayout->addWidget(m_stack, 1);
 
-    // ── PAGE 0: Planer (Kalendarz + Wydarzenia) ──────────
+    m_mainHubPanel = new MainHubPanel(this);
+    m_stack->addWidget(m_mainHubPanel);      // index 0
+
+    // ── PAGE 1: Planer (Kalendarz + Wydarzenia) ──────────
     auto* planerPage = new QWidget(this);
     auto* planerLayout = new QHBoxLayout(planerPage);
     planerLayout->setContentsMargins(0, 0, 0, 0);
@@ -162,20 +176,23 @@ void MainWindow::setupUi()
     planerLayout->addWidget(calSep);
     planerLayout->addWidget(eventsPanel, 1);
 
-    m_stack->addWidget(planerPage);          // index 0
+    m_stack->addWidget(planerPage);          // index 1
 
-    // ── PAGE 1: Cele ──────────────────────────────────────
+    // ── PAGE 2: Cele ──────────────────────────────────────
     m_goalsPanel = new GoalsPanel(this);
     m_goalsPanel->setDate(m_selectedDate);
-    m_stack->addWidget(m_goalsPanel);        // index 1
+    m_stack->addWidget(m_goalsPanel);        // index 2
 
-    // ── PAGE 2: Portfel ───────────────────────────────────
+    // ── PAGE 3: Portfel ───────────────────────────────────
     m_portfolioPanel = new PortfolioPanel(this);
-    m_stack->addWidget(m_portfolioPanel);    // index 2
+    m_stack->addWidget(m_portfolioPanel);    // index 3
 
-    // ── PAGE 3: Mapa ──────────────────────────────────────
+    // ── PAGE 4: Mapa ──────────────────────────────────────
     m_mapPanel = new MapPanel(this);
-    m_stack->addWidget(m_mapPanel);          // index 3
+    m_stack->addWidget(m_mapPanel);          // index 4
+
+    m_calculatorPanel = new FinancialCalculatorPanel(this);
+    m_stack->addWidget(m_calculatorPanel);   // index 5
 
     m_tabBarWidget->installEventFilter(this);
     m_leftPanelWidget->installEventFilter(this);
@@ -236,6 +253,9 @@ void MainWindow::setupConnections()
 
     // Ustawienia
     connect(m_settingsBtn, &QPushButton::clicked, this, &MainWindow::onSettings);
+
+    connect(m_mainHubPanel, &MainHubPanel::navigateRequested,
+            this, &MainWindow::switchTab);
 }
 
 void MainWindow::switchTab(int index)
@@ -245,8 +265,12 @@ void MainWindow::switchTab(int index)
 
     m_stack->setCurrentIndex(index);
 
-    if (index == 2)
+    if (index == TabHome)
+        m_mainHubPanel->refresh();
+    if (index == TabPortfolio)
         m_portfolioPanel->refreshTable();
+    if (index == TabCalculator)
+        m_calculatorPanel->refreshPortfolioAssets();
 }
 
 void MainWindow::onDateSelected(const QDate& date)
@@ -254,6 +278,7 @@ void MainWindow::onDateSelected(const QDate& date)
     m_selectedDate = date;
     refreshEvents();
     m_goalsPanel->setDate(date);
+    m_mainHubPanel->refresh();
 }
 
 void MainWindow::onAddEvent()
@@ -263,6 +288,7 @@ void MainWindow::onAddEvent()
         Event e = dialog.getEvent();
         if (DatabaseManager::instance().addEvent(e)) {
             refreshEvents();
+            m_mainHubPanel->refresh();
         } else {
             QMessageBox::warning(this, "Błąd", "Nie udało się zapisać wydarzenia.");
         }
@@ -282,6 +308,7 @@ void MainWindow::onDeleteEvent()
     if (reply == QMessageBox::Yes) {
         DatabaseManager::instance().deleteEvent(id);
         refreshEvents();
+        m_mainHubPanel->refresh();
     }
 }
 
@@ -325,9 +352,21 @@ void MainWindow::loadColors()
 {
     QSettings s("Kryst", "DailyStockObserver");
     AppColors def = AppColors::defaults();
+
+    const bool hasExtendedPalette = s.contains("colors/surface")
+        && s.contains("colors/border")
+        && s.contains("colors/text");
+    if (!hasExtendedPalette) {
+        m_colors = def;
+        return;
+    }
+
     m_colors.accent    = QColor(s.value("colors/accent",    def.accent.name()).toString());
     m_colors.leftPanel = QColor(s.value("colors/leftPanel", def.leftPanel.name()).toString());
     m_colors.appBg     = QColor(s.value("colors/appBg",     def.appBg.name()).toString());
+    m_colors.surface   = QColor(s.value("colors/surface",   def.surface.name()).toString());
+    m_colors.border    = QColor(s.value("colors/border",    def.border.name()).toString());
+    m_colors.text      = QColor(s.value("colors/text",      def.text.name()).toString());
     m_colors.pattern   = static_cast<PatternType>(s.value("colors/pattern", 0).toInt());
 
     QString markStr    = s.value("colors/patternMark", "").toString();
@@ -338,6 +377,9 @@ void MainWindow::loadColors()
     if (!m_colors.accent.isValid())    m_colors.accent    = def.accent;
     if (!m_colors.leftPanel.isValid()) m_colors.leftPanel = def.leftPanel;
     if (!m_colors.appBg.isValid())     m_colors.appBg     = def.appBg;
+    if (!m_colors.surface.isValid())   m_colors.surface   = def.surface;
+    if (!m_colors.border.isValid())    m_colors.border    = def.border;
+    if (!m_colors.text.isValid())      m_colors.text      = def.text;
 }
 
 void MainWindow::saveColors()
@@ -346,6 +388,9 @@ void MainWindow::saveColors()
     s.setValue("colors/accent",    m_colors.accent.name());
     s.setValue("colors/leftPanel", m_colors.leftPanel.name());
     s.setValue("colors/appBg",     m_colors.appBg.name());
+    s.setValue("colors/surface",   m_colors.surface.name());
+    s.setValue("colors/border",    m_colors.border.name());
+    s.setValue("colors/text",      m_colors.text.name());
     s.setValue("colors/pattern",     static_cast<int>(m_colors.pattern));
     s.setValue("colors/patternMark", m_colors.patternMark.isValid()
                                      ? m_colors.patternMark.name() : "");
@@ -401,6 +446,9 @@ void MainWindow::applyStyle()
     const QColor& acc = m_colors.accent;
     const QColor& lp  = m_colors.leftPanel;
     const QColor& bg  = m_colors.appBg;
+    const QColor& surface = m_colors.surface;
+    const QColor& border = m_colors.border;
+    const QColor& text = m_colors.text;
 
     QString accHex   = acc.name();
     QString accHover = acc.darker(112).name();
@@ -425,22 +473,25 @@ void MainWindow::applyStyle()
     QString tabLine = lp.darker(115).name();
     // Tło tabBar i leftPanel malowane przez eventFilter — nie potrzeba CSS background dla nich
 
-    QString bgHex    = bg.name();
-    QString sepHex   = bg.darker(115).name();
-    QString listBord = bg.darker(108).name();
+    QString bgHex      = bg.name();
+    QString surfaceHex = surface.name();
+    QString borderHex  = border.name();
+    QString textHex    = text.name();
+    QString sepHex     = borderHex;
+    QString listBord   = borderHex;
 
     bool lpDark = lp.lightness() < 128;
     bool bgDark = bg.lightness() < 128;
 
-    QString goalItemBg   = bgDark ? bg.lighter(115).name() : "#ffffff";
-    QString goalItemBord = bgDark ? bg.lighter(140).name() : listBord;
+    QString goalItemBg   = surfaceHex;
+    QString goalItemBord = borderHex;
 
     QString lpText       = lpDark ? "#ffffff"               : "#222222";
     QString lpSubText    = lpDark ? "rgba(255,255,255,0.55)" : "rgba(0,0,0,0.50)";
     QString lpBtnHoverBg = lpDark ? "rgba(255,255,255,0.10)" : "rgba(0,0,0,0.07)";
 
-    QString dateText = bgDark ? "#e8eaf0" : "#1a2535";
-    QString evText   = bgDark ? "#dde1e8" : "#2d3748";
+    QString dateText = bgDark ? "#e8eaf0" : textHex;
+    QString evText   = bgDark ? "#dde1e8" : textHex;
 
     setStyleSheet(
         "QMainWindow { background: " + bgHex + "; }\n"
@@ -514,7 +565,7 @@ void MainWindow::applyStyle()
         "#dateLabel { font-size: 20px; font-weight: bold; color: " + dateText + ";"
         " padding-bottom: 4px; border-bottom: 2px solid " + accHex + "; }\n"
 
-        "#eventList { background: #ffffff; border: 1px solid " + listBord + ";"
+        "#eventList { background: " + surfaceHex + "; border: 1px solid " + listBord + ";"
         " border-radius: 8px; font-size: 14px; color: " + evText + "; padding: 4px; }\n"
 
         "#eventList::item { padding: 10px 12px;"
@@ -529,7 +580,7 @@ void MainWindow::applyStyle()
         "#addBtn:hover   { background: " + accHover + "; }\n"
         "#addBtn:pressed { background: " + accPress  + "; }\n"
 
-        "#deleteBtn { background: #ffffff; color: #e53e3e;"
+        "#deleteBtn { background: " + surfaceHex + "; color: #e53e3e;"
         " border: 1.5px solid #e53e3e; border-radius: 6px;"
         " padding: 10px 18px; font-size: 13px; }\n"
         "#deleteBtn:hover    { background: #fff5f5; }\n"
@@ -595,6 +646,42 @@ void MainWindow::applyStyle()
         "#weekToggle:hover { color: " + evText + "; }\n"
 
         "#goalsEmpty { color: #bbb; font-size: 13px; padding: 20px; }\n"
+
+        "#mainHubPanel { background: " + bgHex + "; }\n"
+        "#hubTitle { font-size: 24px; font-weight: bold; color: " + dateText + "; }\n"
+        "#hubSubtitle { font-size: 13px; color: #777; }\n"
+        "QFrame#hubMetricCard, QFrame#hubModuleCard, QFrame#hubXpCard { background: " + goalItemBg + ";"
+        " border: 1px solid " + goalItemBord + "; border-radius: 8px; }\n"
+        "#hubMetricCaption { color: #777; font-size: 12px; }\n"
+        "#hubMetricValue { color: " + evText + "; font-size: 22px; font-weight: bold; }\n"
+        "#hubCardTitle { color: " + dateText + "; font-size: 16px; font-weight: bold; }\n"
+        "#hubCardBody { color: " + evText + "; font-size: 13px; }\n"
+        "#hubLevelBadge { color: white; background: " + accHex + "; border-radius: 6px;"
+        " padding: 4px 10px; font-weight: bold; }\n"
+        "QProgressBar#hubXpProgress { border: none; border-radius: 5px;"
+        " background: " + altRow + "; min-height: 10px; max-height: 10px; }\n"
+        "QProgressBar#hubXpProgress::chunk { background: " + accHex + "; border-radius: 5px; }\n"
+        "#hubNavBtn { background: " + accHex + "; color: white; border: none;"
+        " border-radius: 6px; padding: 9px 14px; font-size: 13px; font-weight: bold; }\n"
+        "#hubNavBtn:hover { background: " + accHover + "; }\n"
+        "#hubNavBtn:pressed { background: " + accPress + "; }\n"
+
+        "#financialCalculatorPanel { background: " + bgHex + "; }\n"
+        "#calcTitle { font-size: 22px; font-weight: bold; color: " + dateText + "; }\n"
+        "#calcSubtitle { font-size: 13px; color: #777; padding-bottom: 6px; }\n"
+        "QFrame#calcInputFrame, QFrame#calcResultFrame { background: " + goalItemBg + ";"
+        " border: 1px solid " + goalItemBord + "; border-radius: 8px; }\n"
+        "#calcSectionTitle { font-size: 15px; font-weight: bold; color: " + dateText + "; }\n"
+        "#calcResultMain { font-size: 18px; font-weight: bold; color: " + evText + "; }\n"
+        "#calcFormula { font-family: Consolas, monospace; color: #666; padding: 8px 0; }\n"
+        "#calcSourceStatus { color: #777; font-size: 12px; }\n"
+        "#calcDetails { background: " + surfaceHex + "; border: 1px solid " + listBord + ";"
+        " border-radius: 6px; color: " + evText + "; font-size: 13px; }\n"
+        "#calcPrimaryBtn { background: " + accHex + "; color: white; border: none;"
+        " border-radius: 6px; padding: 10px 18px; font-size: 13px; font-weight: bold; }\n"
+        "#calcPrimaryBtn:hover { background: " + accHover + "; }\n"
+        "#calcPrimaryBtn:pressed { background: " + accPress + "; }\n"
+        "#calcPrimaryBtn:disabled { background: #aaa; }\n"
     );
 
     // Wymuś przerysowanie widgetów obsługiwanych przez eventFilter

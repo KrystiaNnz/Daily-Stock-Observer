@@ -56,37 +56,14 @@ struct PortfolioTransaction {
     QString note;
 };
 
-// Giełda papierów wartościowych
-struct StockExchange {
-    int     id               = 0;
-    QString country;
-    QString region;
-    QString name;
-    QString website;
-    QString type;
-    QString city;
-    double  lat              = 0.0;
-    double  lon              = 0.0;
-    QString address;
-    int     foundedYear      = 0;
-    int     listedCompanies  = 0;
-};
-
-// Kraj z bazy danych
-struct Country {
-    int     id              = 0;
-    QString iso2;
-    QString namePl;
-    QString capital;
-    QString continent;
-    QString currency;
-    QString languages;
-    double  areaKm2         = 0.0;
-    double  populationMln   = 0.0;
-    double  gdpBlnUsd       = 0.0;
-    double  gdpPerCapitaPpp = 0.0;
-    double  hdi             = 0.0;
-    QString demographicTrend;
+// Profil doświadczenia użytkownika
+struct ExperienceProfile {
+    int totalXp = 0;
+    int level = 1;
+    int xpIntoLevel = 0;
+    int xpForNextLevel = 100;
+    int streakDays = 0;
+    int completedStepsToday = 0;
 };
 
 // DatabaseManager - obsługuje bazę danych SQLite
@@ -124,6 +101,11 @@ public:
     bool         deleteStep(int stepId);
     QList<Step>  getStepsForGoal(int goalId);
 
+    // ── Experience / XP ───────────────────────────────────
+    ExperienceProfile getExperienceProfile();
+    int               xpForLevel(int level) const;
+    bool              awardExperience(const QString& source, int xp, const QString& reference = QString());
+
     // ── Goal update ──────────────────────────────────────
     // Aktualizuje tytuł, opis i dueDate (nie dotyka kroków)
     bool         updateGoal(const Goal& goal);
@@ -131,16 +113,6 @@ public:
     // ── Seed ─────────────────────────────────────────────
     // Wstawia domyślne cele tylko przy pierwszym uruchomieniu (pusta tabela goals)
     void seedGoals();
-
-    // ── Stock Exchanges ──────────────────────────────────
-    // Wstawia 207 giełd z exchanges_data.json tylko przy pierwszym uruchomieniu
-    void                 seedExchanges();
-    QList<StockExchange> getAllExchanges();
-
-    // ── Countries ────────────────────────────────────────
-    // Wstawia ~195 krajów z countries_data.json tylko przy pierwszym uruchomieniu
-    void    seedCountries();
-    Country getCountry(const QString& iso2);
 
     // ── Portfolio ────────────────────────────────────────
     // addAsset ustawia asset.id po sukcesie
@@ -155,5 +127,7 @@ public:
 
 private:
     DatabaseManager() = default;
+    bool awardExperienceForStep(int stepId);
+    int  calculateStreakDays();
     QSqlDatabase m_db;
 };
