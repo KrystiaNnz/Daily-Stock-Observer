@@ -57,6 +57,36 @@ struct PortfolioTransaction {
     QString note;
 };
 
+struct MarketPriceBar {
+    int     id = 0;
+    QString ticker;
+    QString interval = "1d";
+    QString timestamp;
+    QString tradingDate;
+    double  open = 0.0;
+    double  high = 0.0;
+    double  low = 0.0;
+    double  close = 0.0;
+    double  adjClose = 0.0;
+    double  volume = 0.0;
+    QString currency;
+    QString source = "yfinance";
+    QString updatedAt;
+};
+
+struct MarketPriceCacheMeta {
+    bool    exists = false;
+    QString ticker;
+    QString interval = "1d";
+    QString source = "yfinance";
+    QString currency;
+    QString firstTimestamp;
+    QString lastTimestamp;
+    QString lastSuccessfulUpdate;
+    QString status = "ok";
+    QString errorMessage;
+};
+
 // Profil doświadczenia użytkownika
 struct ExperienceProfile {
     int totalXp = 0;
@@ -125,6 +155,23 @@ public:
     // addTransaction ustawia tx.id po sukcesie
     bool                           addTransaction(PortfolioTransaction& tx);
     QList<PortfolioTransaction>    getTransactionsForTicker(const QString& ticker);
+
+    // Historyczne ceny/cache rynku
+    bool                       upsertMarketPriceBars(const QList<MarketPriceBar>& bars);
+    QList<MarketPriceBar>      getMarketPriceBars(const QString& ticker,
+                                                  const QString& interval,
+                                                  const QString& startTimestamp,
+                                                  const QString& endTimestamp,
+                                                  const QString& source = "yfinance");
+    MarketPriceCacheMeta       getMarketPriceCacheMeta(const QString& ticker,
+                                                       const QString& interval,
+                                                       const QString& source = "yfinance");
+    bool                       refreshMarketPriceCacheMeta(const QString& ticker,
+                                                           const QString& interval,
+                                                           const QString& source,
+                                                           const QString& currency,
+                                                           const QString& status = "ok",
+                                                           const QString& errorMessage = QString());
 
 private:
     DatabaseManager() = default;

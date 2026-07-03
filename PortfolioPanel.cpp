@@ -3,6 +3,8 @@
 #include "DatabaseManager.h"
 #include "CompanyAnalysisPanel.h"
 #include "PeersPanel.h"
+#include "HistoricalPriceChartWidget.h"
+#include "HistoricalPriceAnalysisDialog.h"
 
 #include <QTableWidget>
 #include <QTableWidgetItem>
@@ -17,6 +19,8 @@
 #include <QSet>
 #include <QSplitter>
 #include <QTabWidget>
+#include <QDate>
+#include <QDateEdit>
 
 // ── Pomocnicze: item tylko do odczytu ─────────────────
 static QTableWidgetItem* roItem(const QString& text)
@@ -39,7 +43,7 @@ static QTableWidgetItem* roItemNum(double val, int decimals = 2)
 // ══════════════════════════════════════════════════════
 
 PortfolioPanel::PortfolioPanel(QWidget* parent)
-    : QWidget(parent), m_fetcher(this)
+    : QWidget(parent), m_fetcher(this), m_historyFetcher(this)
 {
     setupUi();
 
@@ -47,6 +51,10 @@ PortfolioPanel::PortfolioPanel(QWidget* parent)
             this, &PortfolioPanel::onFetchFinished);
     connect(&m_fetcher, &PortfolioFetcher::fetchError,
             this, &PortfolioPanel::onFetchError);
+    connect(&m_historyFetcher, &HistoricalPriceFetcher::fetchFinished,
+            this, &PortfolioPanel::onHistoryFetchFinished);
+    connect(&m_historyFetcher, &HistoricalPriceFetcher::fetchError,
+            this, &PortfolioPanel::onHistoryFetchError);
 }
 
 void PortfolioPanel::setupUi()
@@ -134,6 +142,7 @@ void PortfolioPanel::setupUi()
     m_bottomTabs->setDocumentMode(true);
     m_bottomTabs->addTab(m_analysisPanel, "Analiza spółki");
     m_bottomTabs->addTab(m_peersPanel,    "Mapa Rynku");
+    m_bottomTabs->addTab(createReportsTab(), "Raporty");
 
     // ── Splitter: tabela (góra) + zakładki (dół) ─────────
     m_splitter = new QSplitter(Qt::Vertical, this);
@@ -165,6 +174,87 @@ void PortfolioPanel::setupUi()
 
 // ── Dane ──────────────────────────────────────────────
 
+QWidget* PortfolioPanel::createReportsTab()
+{
+    auto* page = new QWidget(this);
+    auto* root = new QVBoxLayout(page);
+    root->setContentsMargins(12, 12, 12, 12);
+    root->setSpacing(10);
+
+    auto* controls = new QHBoxLayout();
+    controls->setSpacing(8);
+
+    controls->addWidget(new QLabel("Ticker:", page));
+    m_historyTickerCombo = new QComboBox(page);
+    m_historyTickerCombo->setEditable(true);
+    m_historyTickerCombo->setMinimumWidth(140);
+    controls->addWidget(m_historyTickerCombo);
+
+    controls->addWidget(new QLabel("Od:", page));
+    m_historyStartEdit = new QDateEdit(QDate::currentDate().addYears(-1), page);
+    m_historyStartEdit->setCalendarPopup(true);
+    m_historyStartEdit->setDisplayFormat("yyyy-MM-dd");
+    controls->addWidget(m_historyStartEdit);
+
+    controls->addWidget(new QLabel("Do:", page));
+    m_historyEndEdit = new QDateEdit(QDate::currentDate(), page);
+    m_historyEndEdit->setCalendarPopup(true);
+    m_historyEndEdit->setDisplayFormat("yyyy-MM-dd");
+    controls->addWidget(m_historyEndEdit);
+
+    controls->addWidget(new QLabel("Wykres:", page));
+    m_historyChartTypeCombo = new QComboBox(page);
+    m_historyChartTypeCombo->addItem("Linia", int(HistoricalPriceChartWidget::ChartType::LineClose));
+    m_historyChartTypeCombo->addItem("Slupki", int(HistoricalPriceChartWidget::ChartType::BarClose));
+    m_historyChartTypeCombo->addItem("Swiece", int(HistoricalPriceChartWidget::ChartType::Candlestick));
+    m_historyChartTypeCombo->setMinimumWidth(110);
+    controls->addWidget(m_historyChartTypeCombo);
+
+    m_historyLoadBtn = new QPushButton("Załaduj tabelę", page);
+    controls->addWidget(m_historyLoadBtn);
+    m_historyExpandBtn = new QPushButton("Rozszerz", page);
+    m_historyExpandBtn->setEnabled(false);
+    controls->addWidget(m_historyExpandBtn);
+    controls->addStretch();
+    root->addLayout(controls);
+
+    m_historyStatusLabel = new QLabel("Wybierz ticker i zakres dat.", page);
+    m_historyStatusLabel->setStyleSheet("color: #666; font-size: 12px;");
+    root->addWidget(m_historyStatusLabel);
+
+    m_historyChart = new HistoricalPriceChartWidget(page);
+
+    m_historyTable = new QTableWidget(0, 8, page);
+    m_historyTable->setHorizontalHeaderLabels({
+        "Data", "Open", "High", "Low", "Close", "Adj Close", "Volume", "Źródło"
+    });
+    m_historyTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+    m_historyTable->setSelectionBehavior(QAbstractItemView::SelectRows);
+    m_historyTable->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_historyTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    m_historyTable->setSortingEnabled(true);
+    m_historyTable->setAlternatingRowColors(true);
+    m_historyTable->verticalHeader()->setVisible(false);
+
+    auto* historySplitter = new QSplitter(Qt::Vertical, page);
+    historySplitter->setHandleWidth(4);
+    historySplitter->addWidget(m_historyChart);
+    historySplitter->addWidget(m_historyTable);
+    historySplitter->setStretchFactor(0, 2);
+    historySplitter->setStretchFactor(1, 3);
+    historySplitter->setSizes({240, 320});
+    root->addWidget(historySplitter, 1);
+
+    connect(m_historyLoadBtn, &QPushButton::clicked,
+            this, &PortfolioPanel::onLoadHistoricalPrices);
+    connect(m_historyChartTypeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, &PortfolioPanel::onHistoryChartTypeChanged);
+    connect(m_historyExpandBtn, &QPushButton::clicked,
+            this, &PortfolioPanel::onOpenHistoryAnalysis);
+
+    return page;
+}
+
 void PortfolioPanel::refreshTable()
 {
     m_table->setSortingEnabled(false);
@@ -194,6 +284,7 @@ void PortfolioPanel::refreshTable()
 
     m_table->setSortingEnabled(true);
     rebuildFilterCombos();
+    rebuildHistoryTickerCombo();
     applyFilter();
     updateSummary();
 
@@ -458,4 +549,247 @@ void PortfolioPanel::applyFilter()
 void PortfolioPanel::onFilterChanged()
 {
     applyFilter();
+}
+
+QString PortfolioPanel::historyStartTimestamp() const
+{
+    return m_historyStartEdit->date().toString("yyyy-MM-dd") + "T00:00:00";
+}
+
+QString PortfolioPanel::historyEndTimestamp() const
+{
+    return m_historyEndEdit->date().toString("yyyy-MM-dd") + "T23:59:59";
+}
+
+void PortfolioPanel::rebuildHistoryTickerCombo()
+{
+    if (!m_historyTickerCombo) return;
+
+    QString current = m_historyTickerCombo->currentText().trimmed();
+    QSet<QString> tickers;
+    for (int r = 0; r < m_table->rowCount(); ++r) {
+        QString ticker = m_table->item(r, Ticker)->text().trimmed().toUpper();
+        if (!ticker.isEmpty())
+            tickers.insert(ticker);
+    }
+
+    m_historyTickerCombo->blockSignals(true);
+    m_historyTickerCombo->clear();
+    QStringList sorted = QStringList(tickers.begin(), tickers.end());
+    sorted.sort();
+    m_historyTickerCombo->addItems(sorted);
+    if (!current.isEmpty()) {
+        int idx = m_historyTickerCombo->findText(current, Qt::MatchFixedString);
+        if (idx >= 0)
+            m_historyTickerCombo->setCurrentIndex(idx);
+        else
+            m_historyTickerCombo->setEditText(current);
+    }
+    m_historyTickerCombo->blockSignals(false);
+}
+
+void PortfolioPanel::onLoadHistoricalPrices()
+{
+    if (m_historyFetcher.isFetching()) return;
+
+    QString ticker = m_historyTickerCombo->currentText().trimmed().toUpper();
+    if (ticker.isEmpty()) {
+        m_historyChart->clearChart();
+        m_historyRows.clear();
+        m_historyExpandBtn->setEnabled(false);
+        QMessageBox::warning(this, "Brak tickera", "Podaj ticker do pobrania historii cen.");
+        return;
+    }
+    if (m_historyStartEdit->date() > m_historyEndEdit->date()) {
+        m_historyChart->clearChart();
+        m_historyRows.clear();
+        m_historyExpandBtn->setEnabled(false);
+        QMessageBox::warning(this, "Błędny zakres", "Data początkowa musi być wcześniejsza niż data końcowa.");
+        return;
+    }
+
+    m_historyTicker = ticker;
+    m_historyInterval = "1d";
+    m_historySource = "yfinance";
+    queueMissingHistoryRanges();
+
+    if (m_pendingHistoryRanges.isEmpty()) {
+        loadHistoricalTable();
+        return;
+    }
+
+    setHistoryBusy(true);
+    startNextHistoryFetch();
+}
+
+void PortfolioPanel::onHistoryChartTypeChanged(int index)
+{
+    if (!m_historyChartTypeCombo || !m_historyChart)
+        return;
+
+    bool ok = false;
+    const int rawType = m_historyChartTypeCombo->itemData(index).toInt(&ok);
+    if (!ok)
+        return;
+
+    m_historyChart->setChartType(static_cast<HistoricalPriceChartWidget::ChartType>(rawType));
+}
+
+void PortfolioPanel::onOpenHistoryAnalysis()
+{
+    if (m_historyRows.isEmpty()) {
+        QMessageBox::information(this, "Analiza wykresu", "Najpierw zaladuj dane historyczne dla wybranego tickera.");
+        return;
+    }
+
+    const auto chartType = static_cast<HistoricalPriceChartWidget::ChartType>(
+        m_historyChartTypeCombo->currentData().toInt());
+    HistoricalPriceAnalysisDialog dialog(
+        m_historyRows,
+        m_historyTicker,
+        m_historyInterval,
+        m_historyCurrency,
+        chartType,
+        this);
+    dialog.exec();
+}
+
+void PortfolioPanel::queueMissingHistoryRanges()
+{
+    m_pendingHistoryRanges.clear();
+
+    const QDate requestedStart = m_historyStartEdit->date();
+    const QDate requestedEnd = m_historyEndEdit->date();
+    const QString reqStartTs = historyStartTimestamp();
+    const QString reqEndTs = historyEndTimestamp();
+
+    MarketPriceCacheMeta meta = DatabaseManager::instance().getMarketPriceCacheMeta(
+        m_historyTicker, m_historyInterval, m_historySource);
+
+    if (!meta.exists || meta.firstTimestamp.isEmpty() || meta.lastTimestamp.isEmpty()) {
+        m_pendingHistoryRanges.append({requestedStart.toString("yyyy-MM-dd"),
+                                       requestedEnd.toString("yyyy-MM-dd")});
+        return;
+    }
+
+    QDate cachedFirst = QDate::fromString(meta.firstTimestamp.left(10), "yyyy-MM-dd");
+    QDate cachedLast = QDate::fromString(meta.lastTimestamp.left(10), "yyyy-MM-dd");
+    if (!cachedFirst.isValid() || !cachedLast.isValid()) {
+        m_pendingHistoryRanges.append({requestedStart.toString("yyyy-MM-dd"),
+                                       requestedEnd.toString("yyyy-MM-dd")});
+        return;
+    }
+
+    if (reqStartTs < meta.firstTimestamp) {
+        QDate endBeforeCache = cachedFirst.addDays(-1);
+        if (requestedStart <= endBeforeCache)
+            m_pendingHistoryRanges.append({requestedStart.toString("yyyy-MM-dd"),
+                                           endBeforeCache.toString("yyyy-MM-dd")});
+    }
+
+    if (reqEndTs > meta.lastTimestamp) {
+        QDate startAfterCache = cachedLast.addDays(1);
+        if (startAfterCache <= requestedEnd)
+            m_pendingHistoryRanges.append({startAfterCache.toString("yyyy-MM-dd"),
+                                           requestedEnd.toString("yyyy-MM-dd")});
+    }
+}
+
+void PortfolioPanel::startNextHistoryFetch()
+{
+    if (m_pendingHistoryRanges.isEmpty()) {
+        setHistoryBusy(false);
+        loadHistoricalTable();
+        return;
+    }
+
+    QPair<QString, QString> range = m_pendingHistoryRanges.takeFirst();
+    m_historyStatusLabel->setText(
+        QString("Pobieranie %1: %2 - %3...")
+            .arg(m_historyTicker, range.first, range.second));
+    m_historyFetcher.fetch(m_historyTicker, range.first, range.second, m_historyInterval);
+}
+
+void PortfolioPanel::onHistoryFetchFinished(const QString& ticker,
+                                            const QString& interval,
+                                            const QString& source,
+                                            const QString& currency,
+                                            const QList<MarketPriceBar>& bars)
+{
+    Q_UNUSED(ticker);
+    Q_UNUSED(interval);
+    Q_UNUSED(source);
+
+    if (!bars.isEmpty()) {
+        DatabaseManager::instance().upsertMarketPriceBars(bars);
+        m_historyCurrency = currency;
+    }
+    DatabaseManager::instance().refreshMarketPriceCacheMeta(
+        m_historyTicker, m_historyInterval, m_historySource, m_historyCurrency, "ok");
+
+    startNextHistoryFetch();
+}
+
+void PortfolioPanel::onHistoryFetchError(const QString& message)
+{
+    m_historyChart->clearChart();
+    m_historyRows.clear();
+    m_historyExpandBtn->setEnabled(false);
+    DatabaseManager::instance().refreshMarketPriceCacheMeta(
+        m_historyTicker, m_historyInterval, m_historySource, m_historyCurrency, "error", message);
+    setHistoryBusy(false);
+    m_historyStatusLabel->setText("Błąd pobierania: " + message);
+    m_historyStatusLabel->setStyleSheet("color: #e53e3e; font-size: 12px;");
+}
+
+void PortfolioPanel::loadHistoricalTable()
+{
+    QList<MarketPriceBar> rows = DatabaseManager::instance().getMarketPriceBars(
+        m_historyTicker, m_historyInterval, historyStartTimestamp(), historyEndTimestamp(), m_historySource);
+    m_historyRows = rows;
+
+    m_historyTable->setSortingEnabled(false);
+    m_historyTable->setRowCount(0);
+
+    for (const MarketPriceBar& bar : rows) {
+        int row = m_historyTable->rowCount();
+        m_historyTable->insertRow(row);
+        m_historyTable->setItem(row, 0, roItem(bar.tradingDate));
+        m_historyTable->setItem(row, 1, roItemNum(bar.open, 4));
+        m_historyTable->setItem(row, 2, roItemNum(bar.high, 4));
+        m_historyTable->setItem(row, 3, roItemNum(bar.low, 4));
+        m_historyTable->setItem(row, 4, roItemNum(bar.close, 4));
+        m_historyTable->setItem(row, 5, roItemNum(bar.adjClose, 4));
+        m_historyTable->setItem(row, 6, roItemNum(bar.volume, 0));
+        m_historyTable->setItem(row, 7, roItem(bar.source));
+    }
+
+    m_historyTable->setSortingEnabled(true);
+
+    MarketPriceCacheMeta meta = DatabaseManager::instance().getMarketPriceCacheMeta(
+        m_historyTicker, m_historyInterval, m_historySource);
+    if (m_historyCurrency.isEmpty())
+        m_historyCurrency = meta.currency;
+    m_historyChart->setBars(rows, m_historyTicker, m_historyInterval, m_historyCurrency);
+    m_historyExpandBtn->setEnabled(!rows.isEmpty());
+
+    QString cacheInfo;
+    if (meta.exists && !meta.firstTimestamp.isEmpty() && !meta.lastTimestamp.isEmpty()) {
+        cacheInfo = QString(" Cache: %1 - %2.")
+            .arg(meta.firstTimestamp.left(10), meta.lastTimestamp.left(10));
+    }
+    m_historyStatusLabel->setText(
+        QString("Tabela %1 (%2): %3 wierszy.%4")
+            .arg(m_historyTicker, m_historyInterval)
+            .arg(rows.size())
+            .arg(cacheInfo));
+    m_historyStatusLabel->setStyleSheet("color: #666; font-size: 12px;");
+}
+
+void PortfolioPanel::setHistoryBusy(bool active)
+{
+    m_historyLoadBtn->setEnabled(!active);
+    m_historyLoadBtn->setText(active ? "Pobieranie..." : "Załaduj tabelę");
+    if (active)
+        m_historyStatusLabel->setStyleSheet("color: #3b82f6; font-size: 12px;");
 }

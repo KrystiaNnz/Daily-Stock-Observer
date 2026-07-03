@@ -459,6 +459,7 @@ void MainWindow::onSettings()
     ProfileSettings profileSettings;
     profileSettings.activeProfileId = ProfileManager::activeProfileId();
     profileSettings.selectedProfileId = ProfileManager::activeProfileId();
+    profileSettings.selectedLanguageCode = ProfileManager::languageCode();
     profileSettings.askAtStartup = ProfileManager::askAtStartup();
 
     SettingsDialog dlg(m_colors, m_display, profileSettings, this);
@@ -469,11 +470,18 @@ void MainWindow::onSettings()
         saveColors();
         saveDisplaySettings();
         ProfileManager::setAskAtStartup(nextProfile.askAtStartup);
+        const QString previousLanguage = ProfileManager::languageCode();
+        ProfileManager::setLanguageCode(nextProfile.selectedLanguageCode);
         if (ProfileManager::normalizeProfileId(nextProfile.selectedProfileId) != ProfileManager::activeProfileId()) {
             ProfileManager::setStartupProfile(nextProfile.selectedProfileId);
             const DataProfile selected = ProfileManager::profile(nextProfile.selectedProfileId);
             QMessageBox::information(this, "Profil danych",
                 "Profil \"" + selected.name + "\" zostanie uzyty po ponownym uruchomieniu aplikacji.");
+        }
+        if (ProfileManager::normalizeLanguageCode(nextProfile.selectedLanguageCode) != previousLanguage) {
+            const AppLanguage selectedLanguage = ProfileManager::language(nextProfile.selectedLanguageCode);
+            QMessageBox::information(this, "Język aplikacji",
+                "Język \"" + selectedLanguage.name + "\" zostanie w pełni zastosowany po ponownym uruchomieniu aplikacji.");
         }
         applyStyle();
         applyDisplaySettings();

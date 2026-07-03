@@ -43,15 +43,21 @@ Wszystkie skrypty piszą JSON na stdout i błędy na stderr. Nigdy nie drukują 
 
 ## Profile danych
 
-`ProfileManager` obsluguje dwa stale profile danych: `private` / Prywatny oraz `test` / Testowy.
+`ProfileManager` obsluguje dwa stale profile danych: `private` / Prywatny oraz `test` / Testowy. Obsluguje tez preferencje jezyka aplikacji w ustawieniach launchera: `pl` / Polski oraz `en` / English.
 
-Przy pierwszym starcie albo po wlaczeniu opcji `Pytaj o profil przy starcie` aplikacja pokazuje `ProfileSelectionDialog`. Sekcja `Profil danych` w `SettingsDialog` pozwala wybrac profil na kolejny start i wlaczyc pytanie przy starcie. Zmiana profilu z ustawien nie przeladowuje bazy w locie; zapisuje wybor w `QSettings("Kryst", "DailyStockObserverLauncher")` i wymaga restartu aplikacji.
+Przy pierwszym starcie albo po wlaczeniu opcji `Pytaj o profil przy starcie` aplikacja pokazuje `ProfileSelectionDialog` z wyborem profilu i jezyka. Sekcja `Profil danych` w `SettingsDialog` pozwala wybrac profil na kolejny start, zmienic jezyk aplikacji i wlaczyc pytanie przy starcie. Zmiana profilu z ustawien nie przeladowuje bazy w locie; wybor profilu i jezyka zapisuje sie w `QSettings("Kryst", "DailyStockObserverLauncher")` i w pelni stosuje po restarcie aplikacji. `main.cpp` ustawia domyslne `QLocale` wedlug zapisanego jezyka; pelne tlumaczenia UI wymagaja pozniejszego podpiecia `QTranslator`.
+
+`ProfileSelectionDialog` pojawia sie przed utworzeniem `MainWindow`, wiec nie dziedziczy glownego `MainWindow::applyStyle()`. Ma wlasne `applyContrastStyle()` i nie powinien uzywac lokalnych stalych kolorow na widgetach; nowe elementy startowego dialogu stylowac przez `objectName` i ten lokalny QSS.
 
 Profil testowy ma widoczny bezpiecznik: tytul okna `Daily Stock Observer - TEST`, napis `Daily Stock Observer [TEST]` w tab barze oraz badge `Profil testowy` w `MainHubPanel`.
 
 ## Baza danych
 
 SQLite jest rozdzielone per profil danych: `%APPDATA%/Kryst/DailyStockObserver/profiles/<profile-id>/daily_stock_observer.db` (`QStandardPaths::AppDataLocation`). Przy pierwszym starcie profilu `private`, jesli nowa baza profilu jeszcze nie istnieje, `DatabaseManager` kopiuje stara baze z `%APPDATA%/Kryst/DailyStockObserver/daily_stock_observer.db` do profilu prywatnego. `DatabaseManager` to Singleton — jedyna klasa która dotyka bazy. PRAGMA `foreign_keys = ON` włączone przy starcie. Schematy tabel tworzone przez `CREATE TABLE IF NOT EXISTS` — zero migracji.
+
+Bazy danych uzytkownika sa osobiste i lokalne. Nie commitowac do GitHuba plikow SQLite ani przyszlych cache'y z historycznymi cenami instrumentow (`market_price_bars`, `market_price_cache_meta`, dane typu AAPL/S&P500 itd.). Repo ma zawierac kod, schematy, migracje i male statyczne zasoby referencyjne, ale nie zbudowany lokalnie cache danych rynkowych. Historyczne ceny maja byc odtwarzalne przez fetcher i przechowywane per profil poza repo.
+
+Raporty portfela rozwijamy w kolejnosci: najpierw tabela historycznych cen, pozniej wykres. Tabela zostaje stalym narzedziem analizy, kontroli danych i eksportu do Excela/Power BI; wykres jest dodatkowa warstwa wizualna, nie zamiennik tabeli. MVP zapisuje dzienne OHLCV w `market_price_bars`, metadane cache w `market_price_cache_meta`, a pole `interval` zostaje przygotowane pod pozniejsze dane godzinowe/minutowe. `HistoricalPriceChartWidget` rysuje wykres nad tabela i ma tryby: linia close, slupki close oraz swiece OHLC. Widget uzywa palety aplikacji, zeby utrzymac kontrast przy jasnym/ciemnym tle. `HistoricalPriceAnalysisDialog` jest duzym widokiem analitycznym otwieranym z przycisku `Rozszerz`; pokazuje ten sam dataset z filtrem dat, statystykami i kopiowaniem/eksportem CSV.
 
 ## Architektura
 

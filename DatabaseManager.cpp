@@ -166,6 +166,55 @@ bool DatabaseManager::init()
         return false;
     }
 
+    if (!q.exec(R"(
+        CREATE TABLE IF NOT EXISTS market_price_bars (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker          TEXT    NOT NULL,
+            interval        TEXT    NOT NULL DEFAULT '1d',
+            timestamp       TEXT    NOT NULL,
+            trading_date    TEXT    NOT NULL,
+            open            REAL,
+            high            REAL,
+            low             REAL,
+            close           REAL,
+            adj_close       REAL,
+            volume          REAL,
+            currency        TEXT,
+            source          TEXT    NOT NULL DEFAULT 'yfinance',
+            created_at      TEXT    DEFAULT CURRENT_TIMESTAMP,
+            updated_at      TEXT    DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(ticker, interval, timestamp, source)
+        )
+    )")) {
+        qDebug() << "Blad tabeli market_price_bars:" << q.lastError().text();
+        return false;
+    }
+
+    if (!q.exec(R"(
+        CREATE TABLE IF NOT EXISTS market_price_cache_meta (
+            id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker                  TEXT    NOT NULL,
+            interval                TEXT    NOT NULL DEFAULT '1d',
+            source                  TEXT    NOT NULL DEFAULT 'yfinance',
+            currency                TEXT,
+            first_timestamp         TEXT,
+            last_timestamp          TEXT,
+            last_successful_update  TEXT,
+            status                  TEXT    DEFAULT 'ok',
+            error_message           TEXT,
+            updated_at              TEXT    DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(ticker, interval, source)
+        )
+    )")) {
+        qDebug() << "Blad tabeli market_price_cache_meta:" << q.lastError().text();
+        return false;
+    }
+
+    q.exec("CREATE INDEX IF NOT EXISTS idx_market_price_bars_lookup "
+           "ON market_price_bars(ticker, interval, source, timestamp)");
+    q.exec("CREATE INDEX IF NOT EXISTS idx_market_price_bars_date "
+           "ON market_price_bars(trading_date)");
+
     return true;
 }
 
@@ -733,6 +782,205 @@ QList<PortfolioTransaction> DatabaseManager::getTransactionsForTicker(const QStr
     }
 
     return txList;
+}
+
+bool DatabaseManager::upsertMarketPriceBars(const QList<MarketPriceBar>& bars)
+{
+    if (bars.isEmpty())
+        return true;
+
+    m_db.transaction();
+    QSqlQuery q;
+    q.prepare(R"(
+        INSERT INTO market_price_bars (
+            ticker, interval, timestamp, trading_date, open, high, low, close,
+            adj_close, volume, currency, source, updated_at
+        ) VALUES (
+            :ticker, :interval, :timestamp, :trading_date, :open, :high, :low, :close,
+            :adj_close, :volume, :currency, :source, :updated_at
+        )
+        ON CONFLICT(ticker, interval, timestamp, source) DO UPDATE SET
+            trading_date = excluded.trading_date,
+            open = excluded.open,
+            high = excluded.high,
+            low = excluded.low,
+            close = excluded.close,
+            adj_close = excluded.adj_close,
+            volume = excluded.volume,
+            currency = excluded.currency,
+            updated_at = excluded.updated_at
+    )");
+
+    const QString now = QDateTime::currentDateTime().toString("yyyy-MM-ddTHH:mm:ss");
+    for (const MarketPriceBar& bar : bars) {
+        q.bindValue(":ticker", bar.ticker.toUpper());
+        q.bindValue(":interval", bar.interval.isEmpty() ? "1d" : bar.interval);
+        q.bindValue(":timestamp", bar.timestamp);
+        q.bindValue(":trading_date", bar.tradingDate);
+        q.bindValue(":open", bar.open);
+        q.bindValue(":high", bar.high);
+        q.bindValue(":low", bar.low);
+        q.bindValue(":close", bar.close);
+        q.bindValue(":adj_close", bar.adjClose);
+        q.bindValue(":volume", bar.volume);
+        q.bindValue(":currency", bar.currency);
+        q.bindValue(":source", bar.source.isEmpty() ? "yfinance" : bar.source);
+        q.bindValue(":updated_at", now);
+        if (!q.exec()) {
+            qDebug() << "Blad upsert market_price_bars:" << q.lastError().text();
+            m_db.rollback();
+            return false;
+        }
+    }
+
+    return m_db.commit();
+}
+
+QList<MarketPriceBar> DatabaseManager::getMarketPriceBars(const QString& ticker,
+                                                          const QString& interval,
+                                                          const QString& startTimestamp,
+                                                          const QString& endTimestamp,
+                                                          const QString& source)
+{
+    QList<MarketPriceBar> bars;
+
+    QSqlQuery q;
+    q.prepare("SELECT id, ticker, interval, timestamp, trading_date, open, high, low, close, "
+              "adj_close, volume, currency, source, updated_at "
+              "FROM market_price_bars "
+              "WHERE ticker = :ticker AND interval = :interval AND source = :source "
+              "AND timestamp >= :start AND timestamp <= :end "
+              "ORDER BY timestamp ASC");
+    q.bindValue(":ticker", ticker.toUpper());
+    q.bindValue(":interval", interval.isEmpty() ? "1d" : interval);
+    q.bindValue(":source", source.isEmpty() ? "yfinance" : source);
+    q.bindValue(":start", startTimestamp);
+    q.bindValue(":end", endTimestamp);
+
+    if (!q.exec()) {
+        qDebug() << "Blad getMarketPriceBars:" << q.lastError().text();
+        return bars;
+    }
+
+    while (q.next()) {
+        MarketPriceBar bar;
+        bar.id = q.value(0).toInt();
+        bar.ticker = q.value(1).toString();
+        bar.interval = q.value(2).toString();
+        bar.timestamp = q.value(3).toString();
+        bar.tradingDate = q.value(4).toString();
+        bar.open = q.value(5).toDouble();
+        bar.high = q.value(6).toDouble();
+        bar.low = q.value(7).toDouble();
+        bar.close = q.value(8).toDouble();
+        bar.adjClose = q.value(9).toDouble();
+        bar.volume = q.value(10).toDouble();
+        bar.currency = q.value(11).toString();
+        bar.source = q.value(12).toString();
+        bar.updatedAt = q.value(13).toString();
+        bars.append(bar);
+    }
+
+    return bars;
+}
+
+MarketPriceCacheMeta DatabaseManager::getMarketPriceCacheMeta(const QString& ticker,
+                                                              const QString& interval,
+                                                              const QString& source)
+{
+    MarketPriceCacheMeta meta;
+    meta.ticker = ticker.toUpper();
+    meta.interval = interval.isEmpty() ? "1d" : interval;
+    meta.source = source.isEmpty() ? "yfinance" : source;
+
+    QSqlQuery q;
+    q.prepare("SELECT ticker, interval, source, currency, first_timestamp, last_timestamp, "
+              "last_successful_update, status, error_message "
+              "FROM market_price_cache_meta "
+              "WHERE ticker = :ticker AND interval = :interval AND source = :source");
+    q.bindValue(":ticker", meta.ticker);
+    q.bindValue(":interval", meta.interval);
+    q.bindValue(":source", meta.source);
+
+    if (!q.exec()) {
+        qDebug() << "Blad getMarketPriceCacheMeta:" << q.lastError().text();
+        return meta;
+    }
+    if (!q.next())
+        return meta;
+
+    meta.exists = true;
+    meta.ticker = q.value(0).toString();
+    meta.interval = q.value(1).toString();
+    meta.source = q.value(2).toString();
+    meta.currency = q.value(3).toString();
+    meta.firstTimestamp = q.value(4).toString();
+    meta.lastTimestamp = q.value(5).toString();
+    meta.lastSuccessfulUpdate = q.value(6).toString();
+    meta.status = q.value(7).toString();
+    meta.errorMessage = q.value(8).toString();
+    return meta;
+}
+
+bool DatabaseManager::refreshMarketPriceCacheMeta(const QString& ticker,
+                                                  const QString& interval,
+                                                  const QString& source,
+                                                  const QString& currency,
+                                                  const QString& status,
+                                                  const QString& errorMessage)
+{
+    const QString cleanTicker = ticker.toUpper();
+    const QString cleanInterval = interval.isEmpty() ? "1d" : interval;
+    const QString cleanSource = source.isEmpty() ? "yfinance" : source;
+
+    QString firstTimestamp;
+    QString lastTimestamp;
+    QSqlQuery range;
+    range.prepare("SELECT MIN(timestamp), MAX(timestamp) FROM market_price_bars "
+                  "WHERE ticker = :ticker AND interval = :interval AND source = :source");
+    range.bindValue(":ticker", cleanTicker);
+    range.bindValue(":interval", cleanInterval);
+    range.bindValue(":source", cleanSource);
+    if (range.exec() && range.next()) {
+        firstTimestamp = range.value(0).toString();
+        lastTimestamp = range.value(1).toString();
+    }
+
+    QSqlQuery q;
+    q.prepare(R"(
+        INSERT INTO market_price_cache_meta (
+            ticker, interval, source, currency, first_timestamp, last_timestamp,
+            last_successful_update, status, error_message, updated_at
+        ) VALUES (
+            :ticker, :interval, :source, :currency, :first_timestamp, :last_timestamp,
+            :last_successful_update, :status, :error_message, :updated_at
+        )
+        ON CONFLICT(ticker, interval, source) DO UPDATE SET
+            currency = excluded.currency,
+            first_timestamp = excluded.first_timestamp,
+            last_timestamp = excluded.last_timestamp,
+            last_successful_update = excluded.last_successful_update,
+            status = excluded.status,
+            error_message = excluded.error_message,
+            updated_at = excluded.updated_at
+    )");
+    const QString now = QDateTime::currentDateTime().toString("yyyy-MM-ddTHH:mm:ss");
+    q.bindValue(":ticker", cleanTicker);
+    q.bindValue(":interval", cleanInterval);
+    q.bindValue(":source", cleanSource);
+    q.bindValue(":currency", currency);
+    q.bindValue(":first_timestamp", firstTimestamp);
+    q.bindValue(":last_timestamp", lastTimestamp);
+    q.bindValue(":last_successful_update", status == "ok" ? now : QString());
+    q.bindValue(":status", status);
+    q.bindValue(":error_message", errorMessage);
+    q.bindValue(":updated_at", now);
+
+    if (!q.exec()) {
+        qDebug() << "Blad refreshMarketPriceCacheMeta:" << q.lastError().text();
+        return false;
+    }
+    return true;
 }
 
 QList<Goal> DatabaseManager::getLongTermGoals(const QString& afterDate)

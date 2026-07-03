@@ -10,6 +10,12 @@ struct DataProfile {
     bool isTest = false;
 };
 
+struct AppLanguage {
+    QString code;
+    QString name;
+    QString description;
+};
+
 class ProfileManager
 {
 public:
@@ -27,6 +33,13 @@ public:
     static bool askAtStartup();
     static void setAskAtStartup(bool enabled);
     static bool shouldAskAtStartup();
+
+    static QList<AppLanguage> languages();
+    static AppLanguage language(const QString& code);
+    static QString defaultLanguageCode();
+    static QString normalizeLanguageCode(const QString& code);
+    static QString languageCode();
+    static void setLanguageCode(const QString& code);
 
     static QString appDataRoot();
     static QString profileDataPath(const QString& id = QString());

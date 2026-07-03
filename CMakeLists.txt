@@ -27,6 +27,12 @@ qt_add_executable(DailyStockObserver
     AddGoalDialog.cpp
     PortfolioFetcher.h
     PortfolioFetcher.cpp
+    HistoricalPriceFetcher.h
+    HistoricalPriceFetcher.cpp
+    HistoricalPriceChartWidget.h
+    HistoricalPriceChartWidget.cpp
+    HistoricalPriceAnalysisDialog.h
+    HistoricalPriceAnalysisDialog.cpp
     PortfolioPanel.h
     PortfolioPanel.cpp
     AddAssetDialog.h

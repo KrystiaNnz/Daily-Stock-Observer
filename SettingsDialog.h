@@ -44,6 +44,7 @@ struct DisplaySettings {
 struct ProfileSettings {
     QString activeProfileId;
     QString selectedProfileId;
+    QString selectedLanguageCode;
     bool askAtStartup = false;
 };
 
@@ -108,5 +109,6 @@ private:
 
     // Profil danych
     QComboBox* m_profileCombo = nullptr;
+    QComboBox* m_languageCombo = nullptr;
     QCheckBox* m_askProfileAtStartup = nullptr;
 };

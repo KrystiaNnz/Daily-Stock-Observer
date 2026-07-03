@@ -505,6 +505,18 @@ void SettingsDialog::setupUi()
     profileRow->addWidget(m_profileCombo, 1);
     profileLayout->addLayout(profileRow);
 
+    auto* languageRow = new QHBoxLayout();
+    languageRow->setSpacing(8);
+    languageRow->addWidget(new QLabel("Język aplikacji:", this));
+    m_languageCombo = new QComboBox(this);
+    for (const AppLanguage& language : ProfileManager::languages())
+        m_languageCombo->addItem(language.name, language.code);
+    const int languageIndex = m_languageCombo->findData(
+        ProfileManager::normalizeLanguageCode(m_profile.selectedLanguageCode));
+    m_languageCombo->setCurrentIndex(languageIndex >= 0 ? languageIndex : 0);
+    languageRow->addWidget(m_languageCombo, 1);
+    profileLayout->addLayout(languageRow);
+
     m_askProfileAtStartup = new QCheckBox("Pytaj o profil przy starcie", this);
     m_askProfileAtStartup->setChecked(m_profile.askAtStartup);
     profileLayout->addWidget(m_askProfileAtStartup);
@@ -547,6 +559,8 @@ void SettingsDialog::setupUi()
         m_display.height = m_heightSpin->value();
         if (m_profileCombo)
             m_profile.selectedProfileId = m_profileCombo->currentData().toString();
+        if (m_languageCombo)
+            m_profile.selectedLanguageCode = m_languageCombo->currentData().toString();
         if (m_askProfileAtStartup)
             m_profile.askAtStartup = m_askProfileAtStartup->isChecked();
         accept();

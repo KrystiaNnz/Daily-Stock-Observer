@@ -46,6 +46,51 @@ QString ProfileManager::normalizeProfileId(const QString& id)
     return defaultProfileId();
 }
 
+QList<AppLanguage> ProfileManager::languages()
+{
+    return {
+        {"pl", "Polski", "Interfejs aplikacji po polsku."},
+        {"en", "English", "English application interface."},
+    };
+}
+
+AppLanguage ProfileManager::language(const QString& code)
+{
+    const QString normalized = normalizeLanguageCode(code);
+    for (const AppLanguage& item : languages()) {
+        if (item.code == normalized)
+            return item;
+    }
+    return languages().first();
+}
+
+QString ProfileManager::defaultLanguageCode()
+{
+    return "pl";
+}
+
+QString ProfileManager::normalizeLanguageCode(const QString& code)
+{
+    const QString clean = code.trimmed().toLower();
+    for (const AppLanguage& item : languages()) {
+        if (item.code == clean)
+            return item.code;
+    }
+    return defaultLanguageCode();
+}
+
+QString ProfileManager::languageCode()
+{
+    QSettings settings = launcherSettings();
+    return normalizeLanguageCode(settings.value("ui/language", defaultLanguageCode()).toString());
+}
+
+void ProfileManager::setLanguageCode(const QString& code)
+{
+    QSettings settings = launcherSettings();
+    settings.setValue("ui/language", normalizeLanguageCode(code));
+}
+
 void ProfileManager::initialize()
 {
     QSettings settings = launcherSettings();
