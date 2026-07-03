@@ -28,6 +28,7 @@ private:
     void setupUi();
 
     QLabel* m_dateLabel = nullptr;
+    QLabel* m_profileLabel = nullptr;
     QLabel* m_eventsMetric = nullptr;
     QLabel* m_goalsMetric = nullptr;
     QLabel* m_assetsMetric = nullptr;

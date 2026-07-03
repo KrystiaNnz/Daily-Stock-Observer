@@ -2,6 +2,7 @@
 
 #include <QDialog>
 #include <QColor>
+#include <QString>
 #include "PatternGen.h"   // defines PatternType
 
 class QPushButton;
@@ -11,6 +12,8 @@ class QFormLayout;
 class QRadioButton;
 class QSpinBox;
 class QButtonGroup;
+class QComboBox;
+class QCheckBox;
 
 // ── Kolory aplikacji ───────────────────────────────────────────────
 struct AppColors {
@@ -20,6 +23,7 @@ struct AppColors {
     QColor      surface     { "#f5f5f6" };
     QColor      border      { "#d3d7dd" };
     QColor      text        { "#000000" };
+    bool        autoTextContrast = true;
     PatternType pattern     { PatternType::None };
     QColor      patternMark { "#adadc2" };   // invalid = auto-derive from leftPanel
 
@@ -37,6 +41,12 @@ struct DisplaySettings {
     static DisplaySettings defaults() { return {}; }
 };
 
+struct ProfileSettings {
+    QString activeProfileId;
+    QString selectedProfileId;
+    bool askAtStartup = false;
+};
+
 // ── Dialog ustawień ───────────────────────────────────────────────
 class SettingsDialog : public QDialog
 {
@@ -45,10 +55,12 @@ class SettingsDialog : public QDialog
 public:
     explicit SettingsDialog(const AppColors&      colors,
                             const DisplaySettings& display,
+                            const ProfileSettings& profile,
                             QWidget* parent = nullptr);
 
     AppColors       colors()  const { return m_colors;  }
     DisplaySettings display() const { return m_display; }
+    ProfileSettings profile() const { return m_profile; }
 
 private:
     void setupUi();
@@ -60,9 +72,12 @@ private:
     static void applyBtnStyle(QPushButton* btn, const QColor& color);
     void resetToDefaults();
     void updateSizeEnabled();    // włącz/wyłącz spinboxy wg trybu
+    void updateTextControls();
+    void applyContrastStyle();
 
     AppColors       m_colors;
     DisplaySettings m_display;
+    ProfileSettings m_profile;
 
     // Kolory
     QPushButton* m_accentBtn = nullptr;
@@ -77,6 +92,7 @@ private:
     QLabel*      m_borderHex  = nullptr;
     QPushButton* m_textBtn    = nullptr;
     QLabel*      m_textHex    = nullptr;
+    QCheckBox*   m_autoTextContrastCheck = nullptr;
 
     // Wzory
     QButtonGroup* m_patternGroup       = nullptr;
@@ -89,4 +105,8 @@ private:
     QRadioButton* m_radioFullScreen= nullptr;
     QSpinBox*     m_widthSpin      = nullptr;
     QSpinBox*     m_heightSpin     = nullptr;
+
+    // Profil danych
+    QComboBox* m_profileCombo = nullptr;
+    QCheckBox* m_askProfileAtStartup = nullptr;
 };

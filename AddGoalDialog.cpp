@@ -1,4 +1,5 @@
 #include "AddGoalDialog.h"
+#include "DialogUtils.h"
 
 #include <QVBoxLayout>
 #include <QFormLayout>
@@ -17,6 +18,7 @@ AddGoalDialog::AddGoalDialog(const QDate& defaultDate, QWidget* parent)
     setWindowTitle("Nowy cel");
     setMinimumWidth(420);
     setupUi({}, {}, defaultDate, /*showSteps=*/true);
+    DialogUtils::constrainToParent(this);
 }
 
 AddGoalDialog::AddGoalDialog(const Goal& existing, QWidget* parent)
@@ -28,6 +30,7 @@ AddGoalDialog::AddGoalDialog(const Goal& existing, QWidget* parent)
         ? QDate::currentDate()
         : QDate::fromString(existing.dueDate, "yyyy-MM-dd");
     setupUi(existing.title, existing.description, date, /*showSteps=*/false);
+    DialogUtils::constrainToParent(this);
 }
 
 void AddGoalDialog::setupUi(const QString& titleVal, const QString& descVal,

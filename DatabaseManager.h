@@ -38,6 +38,7 @@ struct PortfolioAsset {
     int     id           = 0;
     QString ticker;               // np. "CDR.WA", "AAPL"
     QString name;
+    QString assetType = "Akcja";
     double  quantity     = 0.0;
     double  avgBuyPrice  = 0.0;   // średnia cena zakupu
     QString currency;             // domyślnie "PLN"

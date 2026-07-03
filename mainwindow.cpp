@@ -8,6 +8,7 @@
 #include "MapPanel.h"
 #include "FinancialCalculatorPanel.h"
 #include "MainHubPanel.h"
+#include "ProfileManager.h"
 
 #include <QCalendarWidget>
 #include <QListWidget>
@@ -22,6 +23,7 @@
 #include <QLocale>
 #include <QFont>
 #include <QCoreApplication>
+#include <QApplication>
 #include <QSettings>
 
 namespace {
@@ -31,6 +33,24 @@ constexpr int TabGoals = 2;
 constexpr int TabPortfolio = 3;
 constexpr int TabMap = 4;
 constexpr int TabCalculator = 5;
+
+QColor contrastTextFor(const QColor& background)
+{
+    const double luminance =
+        0.2126 * background.redF() +
+        0.7152 * background.greenF() +
+        0.0722 * background.blueF();
+    return luminance < 0.52 ? QColor("#ffffff") : QColor("#000000");
+}
+
+QColor blendColors(const QColor& foreground, const QColor& background, double foregroundWeight)
+{
+    const double bgWeight = 1.0 - foregroundWeight;
+    return QColor(
+        qBound(0, qRound(foreground.red() * foregroundWeight + background.red() * bgWeight), 255),
+        qBound(0, qRound(foreground.green() * foregroundWeight + background.green() * bgWeight), 255),
+        qBound(0, qRound(foreground.blue() * foregroundWeight + background.blue() * bgWeight), 255));
+}
 }
 
 MainWindow::MainWindow(QWidget* parent)
@@ -57,7 +77,9 @@ MainWindow::MainWindow(QWidget* parent)
 
 void MainWindow::setupUi()
 {
-    setWindowTitle("Daily Stock Observer");
+    setWindowTitle(ProfileManager::activeProfile().isTest
+        ? "Daily Stock Observer - TEST"
+        : "Daily Stock Observer");
     setMinimumSize(760, 540);
     resize(960, 660);
 
@@ -76,7 +98,9 @@ void MainWindow::setupUi()
     tabLayout->setContentsMargins(16, 0, 16, 0);
     tabLayout->setSpacing(2);
 
-    auto* appTitle = new QLabel("Daily Stock Observer", this);
+    auto* appTitle = new QLabel(ProfileManager::activeProfile().isTest
+        ? "Daily Stock Observer [TEST]"
+        : "Daily Stock Observer", this);
     appTitle->setObjectName("appTitle");
     tabLayout->addWidget(appTitle);
     tabLayout->addSpacing(20);
@@ -350,7 +374,7 @@ void MainWindow::refreshEvents()
 
 void MainWindow::loadColors()
 {
-    QSettings s("Kryst", "DailyStockObserver");
+    QSettings s("Kryst", ProfileManager::profileSettingsAppName());
     AppColors def = AppColors::defaults();
 
     const bool hasExtendedPalette = s.contains("colors/surface")
@@ -367,6 +391,7 @@ void MainWindow::loadColors()
     m_colors.surface   = QColor(s.value("colors/surface",   def.surface.name()).toString());
     m_colors.border    = QColor(s.value("colors/border",    def.border.name()).toString());
     m_colors.text      = QColor(s.value("colors/text",      def.text.name()).toString());
+    m_colors.autoTextContrast = s.value("colors/autoTextContrast", def.autoTextContrast).toBool();
     m_colors.pattern   = static_cast<PatternType>(s.value("colors/pattern", 0).toInt());
 
     QString markStr    = s.value("colors/patternMark", "").toString();
@@ -384,13 +409,14 @@ void MainWindow::loadColors()
 
 void MainWindow::saveColors()
 {
-    QSettings s("Kryst", "DailyStockObserver");
+    QSettings s("Kryst", ProfileManager::profileSettingsAppName());
     s.setValue("colors/accent",    m_colors.accent.name());
     s.setValue("colors/leftPanel", m_colors.leftPanel.name());
     s.setValue("colors/appBg",     m_colors.appBg.name());
     s.setValue("colors/surface",   m_colors.surface.name());
     s.setValue("colors/border",    m_colors.border.name());
     s.setValue("colors/text",      m_colors.text.name());
+    s.setValue("colors/autoTextContrast", m_colors.autoTextContrast);
     s.setValue("colors/pattern",     static_cast<int>(m_colors.pattern));
     s.setValue("colors/patternMark", m_colors.patternMark.isValid()
                                      ? m_colors.patternMark.name() : "");
@@ -398,7 +424,7 @@ void MainWindow::saveColors()
 
 void MainWindow::loadDisplaySettings()
 {
-    QSettings s("Kryst", "DailyStockObserver");
+    QSettings s("Kryst", ProfileManager::profileSettingsAppName());
     m_display.mode   = static_cast<WindowMode>(s.value("display/mode", 0).toInt());
     m_display.width  = s.value("display/width",  960).toInt();
     m_display.height = s.value("display/height", 660).toInt();
@@ -406,7 +432,7 @@ void MainWindow::loadDisplaySettings()
 
 void MainWindow::saveDisplaySettings()
 {
-    QSettings s("Kryst", "DailyStockObserver");
+    QSettings s("Kryst", ProfileManager::profileSettingsAppName());
     s.setValue("display/mode",   static_cast<int>(m_display.mode));
     s.setValue("display/width",  m_display.width);
     s.setValue("display/height", m_display.height);
@@ -430,12 +456,25 @@ void MainWindow::applyDisplaySettings()
 
 void MainWindow::onSettings()
 {
-    SettingsDialog dlg(m_colors, m_display, this);
+    ProfileSettings profileSettings;
+    profileSettings.activeProfileId = ProfileManager::activeProfileId();
+    profileSettings.selectedProfileId = ProfileManager::activeProfileId();
+    profileSettings.askAtStartup = ProfileManager::askAtStartup();
+
+    SettingsDialog dlg(m_colors, m_display, profileSettings, this);
     if (dlg.exec() == QDialog::Accepted) {
         m_colors  = dlg.colors();
         m_display = dlg.display();
+        const ProfileSettings nextProfile = dlg.profile();
         saveColors();
         saveDisplaySettings();
+        ProfileManager::setAskAtStartup(nextProfile.askAtStartup);
+        if (ProfileManager::normalizeProfileId(nextProfile.selectedProfileId) != ProfileManager::activeProfileId()) {
+            ProfileManager::setStartupProfile(nextProfile.selectedProfileId);
+            const DataProfile selected = ProfileManager::profile(nextProfile.selectedProfileId);
+            QMessageBox::information(this, "Profil danych",
+                "Profil \"" + selected.name + "\" zostanie uzyty po ponownym uruchomieniu aplikacji.");
+        }
         applyStyle();
         applyDisplaySettings();
     }
@@ -455,16 +494,11 @@ void MainWindow::applyStyle()
     QString accPress = acc.darker(130).name();
 
     int hue = acc.hsvHue();
-    QString selBg   = (hue >= 0)
-        ? QColor::fromHsv(hue, 35, 255).name()
-        : QColor(235, 235, 235).name();
-    QString selText = (hue >= 0)
-        ? QColor::fromHsv(hue, qMin(acc.hsvSaturation() + 60, 255),
-                               qMax(acc.value() - 55, 80)).name()
-        : QColor(60, 60, 60).name();
-    QString altRow  = (hue >= 0)
-        ? QColor::fromHsv(hue, 18, 252).name()
-        : QColor(248, 248, 248).name();
+    QColor selBgColor = (hue >= 0)
+        ? QColor::fromHsv(hue, 35, acc.lightness() < 128 ? 95 : 255)
+        : QColor(235, 235, 235);
+    QString selBg = selBgColor.name();
+    QString selText = contrastTextFor(selBgColor).name();
 
     QString lpHex   = lp.name();
     QString calNav  = lp.darker(125).name();
@@ -476,24 +510,42 @@ void MainWindow::applyStyle()
     QString bgHex      = bg.name();
     QString surfaceHex = surface.name();
     QString borderHex  = border.name();
-    QString textHex    = text.name();
+    const QColor bgTextColor = m_colors.autoTextContrast ? contrastTextFor(bg) : text;
+    const QColor surfaceTextColor = m_colors.autoTextContrast ? contrastTextFor(surface) : text;
+    const QColor leftTextColor = m_colors.autoTextContrast ? contrastTextFor(lp) : text;
+    QString textHex    = surfaceTextColor.name();
     QString sepHex     = borderHex;
     QString listBord   = borderHex;
 
     bool lpDark = lp.lightness() < 128;
     bool bgDark = bg.lightness() < 128;
+    bool surfaceDark = surface.lightness() < 128;
 
     QString goalItemBg   = surfaceHex;
     QString goalItemBord = borderHex;
 
-    QString lpText       = lpDark ? "#ffffff"               : "#222222";
-    QString lpSubText    = lpDark ? "rgba(255,255,255,0.55)" : "rgba(0,0,0,0.50)";
+    QString lpText       = leftTextColor.name();
+    QString lpSubText    = blendColors(leftTextColor, lp, 0.58).name();
     QString lpBtnHoverBg = lpDark ? "rgba(255,255,255,0.10)" : "rgba(0,0,0,0.07)";
 
-    QString dateText = bgDark ? "#e8eaf0" : textHex;
-    QString evText   = bgDark ? "#dde1e8" : textHex;
+    QString dateText = bgTextColor.name();
+    QString evText   = surfaceTextColor.name();
+    QString bgMutedText = blendColors(bgTextColor, bg, 0.62).name();
+    QString bgSubtleText = blendColors(bgTextColor, bg, 0.46).name();
+    QString surfaceMutedText = blendColors(surfaceTextColor, surface, 0.62).name();
+    QString surfaceSubtleText = blendColors(surfaceTextColor, surface, 0.46).name();
+    QString disabledText = blendColors(surfaceTextColor, surface, 0.35).name();
+    QString fieldBg = surfaceDark ? surface.lighter(118).name() : "#ffffff";
+    QString fieldText = contrastTextFor(QColor(fieldBg)).name();
+    QString fieldMutedText = blendColors(QColor(fieldText), QColor(fieldBg), 0.54).name();
+    QString fieldDisabledBg = surfaceDark ? surface.lighter(108).name() : surface.darker(103).name();
+    QString popupBg = surfaceDark ? surface.lighter(112).name() : "#ffffff";
+    QString popupText = contrastTextFor(QColor(popupBg)).name();
+    QString altRow = (hue >= 0 && !surfaceDark)
+        ? QColor::fromHsv(hue, 18, 252).name()
+        : (surfaceDark ? surface.lighter(125).name() : surface.darker(104).name());
 
-    setStyleSheet(
+    const QString appStyle =
         "QMainWindow { background: " + bgHex + "; }\n"
 
         // ── Tab bar — tło malowane przez eventFilter ──────
@@ -559,6 +611,76 @@ void MainWindow::applyStyle()
 
         "#separator { background: " + sepHex + "; }\n"
 
+        "QLineEdit, QTextEdit, QPlainTextEdit, QComboBox, QAbstractSpinBox {"
+        " background: " + fieldBg + ";"
+        " color: " + fieldText + ";"
+        " border: 1px solid " + listBord + ";"
+        " border-radius: 6px;"
+        " padding: 5px 7px;"
+        " selection-background-color: " + accHex + ";"
+        " selection-color: " + contrastTextFor(acc).name() + "; }\n"
+
+        "QLineEdit:disabled, QTextEdit:disabled, QPlainTextEdit:disabled,"
+        " QComboBox:disabled, QAbstractSpinBox:disabled {"
+        " color: " + fieldMutedText + ";"
+        " background: " + fieldDisabledBg + "; }\n"
+
+        "QAbstractSpinBox { padding-right: 28px; }\n"
+        "QAbstractSpinBox::up-button, QAbstractSpinBox::down-button {"
+        " subcontrol-origin: border;"
+        " width: 20px;"
+        " border-left: 1px solid " + listBord + "; }\n"
+        "QAbstractSpinBox::up-button { subcontrol-position: top right; }\n"
+        "QAbstractSpinBox::down-button { subcontrol-position: bottom right; }\n"
+
+        "QComboBox::drop-down { border: none; width: 24px; }\n"
+
+        "QComboBox QAbstractItemView {"
+        " background: " + popupBg + ";"
+        " color: " + popupText + ";"
+        " border: 1px solid " + listBord + ";"
+        " selection-background-color: " + selBg + ";"
+        " selection-color: " + selText + "; }\n"
+
+        "QCheckBox, QRadioButton, QLabel { color: " + evText + "; }\n"
+
+        "QScrollArea { background: transparent; border: none; }\n"
+        "QScrollArea > QWidget > QWidget { background: transparent; }\n"
+
+        "QTableWidget, QTableView {"
+        " background: " + surfaceHex + ";"
+        " color: " + evText + ";"
+        " alternate-background-color: " + altRow + ";"
+        " gridline-color: " + listBord + ";"
+        " border: 1px solid " + listBord + ";"
+        " border-radius: 6px;"
+        " selection-background-color: " + selBg + ";"
+        " selection-color: " + selText + "; }\n"
+
+        "QHeaderView::section {"
+        " background: " + (surfaceDark ? surface.lighter(112).name() : surface.darker(104).name()) + ";"
+        " color: " + evText + ";"
+        " border: none;"
+        " border-right: 1px solid " + listBord + ";"
+        " border-bottom: 1px solid " + listBord + ";"
+        " padding: 5px 7px;"
+        " font-weight: 600; }\n"
+
+        "QTabWidget::pane {"
+        " border: 1px solid " + listBord + ";"
+        " background: " + surfaceHex + ";"
+        " border-radius: 6px; }\n"
+        "QTabBar::tab {"
+        " background: " + (surfaceDark ? surface.lighter(110).name() : surface.darker(103).name()) + ";"
+        " color: " + surfaceMutedText + ";"
+        " padding: 7px 12px;"
+        " border: 1px solid " + listBord + ";"
+        " border-bottom: none; }\n"
+        "QTabBar::tab:selected {"
+        " background: " + surfaceHex + ";"
+        " color: " + evText + ";"
+        " font-weight: 600; }\n"
+
         // ── Prawy panel (wydarzenia) ───────────────────────
         "#rightPanel { background: " + bgHex + "; }\n"
 
@@ -585,7 +707,7 @@ void MainWindow::applyStyle()
         " padding: 10px 18px; font-size: 13px; }\n"
         "#deleteBtn:hover    { background: #fff5f5; }\n"
         "#deleteBtn:pressed  { background: #fed7d7; }\n"
-        "#deleteBtn:disabled { color: #aaa; border-color: #ccc; }\n"
+        "#deleteBtn:disabled { color: " + disabledText + "; border-color: " + borderHex + "; }\n"
 
         // ── Goals Panel ───────────────────────────────────
         "#goalsPanel { background: " + bgHex + "; }\n"
@@ -594,7 +716,7 @@ void MainWindow::applyStyle()
         "#goalsPanelTitle { font-size: 15px; font-weight: bold;"
         " color: " + dateText + "; }\n"
 
-        "#goalsDayLabel { font-size: 12px; color: #999;"
+        "#goalsDayLabel { font-size: 12px; color: " + bgMutedText + ";"
         " padding: 0 0 6px 0; border-bottom: 1px solid " + listBord + "; }\n"
 
         "#goalsAddBtn { background: " + accHex + "; color: white; border: none;"
@@ -609,7 +731,7 @@ void MainWindow::applyStyle()
         "#goalTitle { font-size: 13px; font-weight: 600;"
         " color: " + evText + "; }\n"
 
-        "#goalProgressLabel { font-size: 11px; color: #999;"
+        "#goalProgressLabel { font-size: 11px; color: " + surfaceMutedText + ";"
         " font-family: Consolas, monospace; }\n"
 
         "QProgressBar#goalProgressBar { border: none; border-radius: 2px;"
@@ -618,15 +740,27 @@ void MainWindow::applyStyle()
         " border-radius: 2px; }\n"
 
         "#goalExpandBtn { background: transparent; border: none;"
-        " color: #bbb; font-size: 11px; font-weight: bold; }\n"
+        " color: " + surfaceSubtleText + "; font-size: 11px; font-weight: bold; }\n"
         "#goalExpandBtn:hover { color: " + evText + "; }\n"
 
         "#goalDeleteBtn { background: transparent; border: none;"
-        " color: #ddd; font-size: 12px; font-weight: bold; }\n"
+        " color: " + surfaceSubtleText + "; font-size: 12px; font-weight: bold; }\n"
         "#goalDeleteBtn:hover { color: #e53e3e; }\n"
+
+        "#goalEditBtn { background: transparent; border: none;"
+        " color: " + surfaceSubtleText + "; font-size: 12px; font-weight: bold; }\n"
+        "#goalEditBtn:hover { color: " + evText + "; }\n"
 
         "#stepsScroll { background: " + goalItemBg + ";"
         " border: 1px solid " + listBord + "; border-radius: 6px; }\n"
+
+        "#stepsEmpty { color: " + surfaceSubtleText + "; font-size: 11px; padding: 4px 2px; }\n"
+
+        "QCheckBox#stepCheckbox { color: " + evText + "; font-size: 12px; padding: 3px 2px; }\n"
+        "QCheckBox#stepCheckbox[done=\"true\"] { color: " + surfaceSubtleText + "; text-decoration: line-through; }\n"
+
+        "#stepDeleteBtn { background: transparent; border: none; color: " + surfaceSubtleText + "; font-size: 10px; }\n"
+        "#stepDeleteBtn:hover { color: #e53e3e; }\n"
 
         "#newStepEdit { border: 1px solid " + listBord + "; border-radius: 4px;"
         " padding: 3px 7px; font-size: 12px; background: " + goalItemBg + ";"
@@ -641,18 +775,28 @@ void MainWindow::applyStyle()
         "#goalsSep { background: " + listBord + "; }\n"
 
         "#weekToggle { background: transparent; border: none;"
-        " color: #999; font-size: 12px; font-weight: 600;"
+        " color: " + bgMutedText + "; font-size: 12px; font-weight: 600;"
         " padding: 6px 4px; text-align: left; }\n"
         "#weekToggle:hover { color: " + evText + "; }\n"
 
-        "#goalsEmpty { color: #bbb; font-size: 13px; padding: 20px; }\n"
+        "#goalsEmpty { color: " + bgSubtleText + "; font-size: 13px; padding: 20px; }\n"
+
+        "#goalsListScroll, #goalsListContainer { background: " + bgHex + "; }\n"
+        "#goalsSearchEdit { background: " + fieldBg + "; color: " + fieldText + "; }\n"
+        "#goalsDateHeader { color: " + bgMutedText + "; font-size: 12px;"
+        " font-weight: 700; padding: 10px 2px 4px 2px; }\n"
 
         "#mainHubPanel { background: " + bgHex + "; }\n"
         "#hubTitle { font-size: 24px; font-weight: bold; color: " + dateText + "; }\n"
-        "#hubSubtitle { font-size: 13px; color: #777; }\n"
+        "#hubSubtitle { font-size: 13px; color: " + bgMutedText + "; }\n"
+        "#hubProfileBadge { color: " + evText + "; background: " + surfaceHex + ";"
+        " border: 1px solid " + borderHex + "; border-radius: 6px;"
+        " padding: 5px 10px; font-size: 12px; font-weight: 600; }\n"
+        "#hubProfileBadge[testProfile=\"true\"] { color: #7f1d1d; background: #fee2e2;"
+        " border-color: #fecaca; }\n"
         "QFrame#hubMetricCard, QFrame#hubModuleCard, QFrame#hubXpCard { background: " + goalItemBg + ";"
         " border: 1px solid " + goalItemBord + "; border-radius: 8px; }\n"
-        "#hubMetricCaption { color: #777; font-size: 12px; }\n"
+        "#hubMetricCaption { color: " + surfaceMutedText + "; font-size: 12px; }\n"
         "#hubMetricValue { color: " + evText + "; font-size: 22px; font-weight: bold; }\n"
         "#hubCardTitle { color: " + dateText + "; font-size: 16px; font-weight: bold; }\n"
         "#hubCardBody { color: " + evText + "; font-size: 13px; }\n"
@@ -668,21 +812,23 @@ void MainWindow::applyStyle()
 
         "#financialCalculatorPanel { background: " + bgHex + "; }\n"
         "#calcTitle { font-size: 22px; font-weight: bold; color: " + dateText + "; }\n"
-        "#calcSubtitle { font-size: 13px; color: #777; padding-bottom: 6px; }\n"
-        "QFrame#calcInputFrame, QFrame#calcResultFrame { background: " + goalItemBg + ";"
+        "#calcSubtitle { font-size: 13px; color: " + bgMutedText + "; padding-bottom: 6px; }\n"
+        "QFrame#calcInputFrame, QFrame#calcResultFrame, QFrame#calcExerciseFrame { background: " + goalItemBg + ";"
         " border: 1px solid " + goalItemBord + "; border-radius: 8px; }\n"
         "#calcSectionTitle { font-size: 15px; font-weight: bold; color: " + dateText + "; }\n"
         "#calcResultMain { font-size: 18px; font-weight: bold; color: " + evText + "; }\n"
-        "#calcFormula { font-family: Consolas, monospace; color: #666; padding: 8px 0; }\n"
-        "#calcSourceStatus { color: #777; font-size: 12px; }\n"
+        "#calcFormula { font-family: Consolas, monospace; color: " + surfaceMutedText + "; padding: 8px 0; }\n"
+        "#calcSourceStatus { color: " + surfaceMutedText + "; font-size: 12px; }\n"
         "#calcDetails { background: " + surfaceHex + "; border: 1px solid " + listBord + ";"
         " border-radius: 6px; color: " + evText + "; font-size: 13px; }\n"
         "#calcPrimaryBtn { background: " + accHex + "; color: white; border: none;"
         " border-radius: 6px; padding: 10px 18px; font-size: 13px; font-weight: bold; }\n"
         "#calcPrimaryBtn:hover { background: " + accHover + "; }\n"
         "#calcPrimaryBtn:pressed { background: " + accPress + "; }\n"
-        "#calcPrimaryBtn:disabled { background: #aaa; }\n"
-    );
+        "#calcPrimaryBtn:disabled { background: " + disabledText + "; }\n";
+
+    qApp->setStyleSheet(appStyle);
+    setStyleSheet(appStyle);
 
     // Wymuś przerysowanie widgetów obsługiwanych przez eventFilter
     if (m_tabBarWidget)    m_tabBarWidget->update();

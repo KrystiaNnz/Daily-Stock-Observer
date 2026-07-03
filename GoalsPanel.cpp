@@ -11,6 +11,7 @@
 #include <QCheckBox>
 #include <QLineEdit>
 #include <QMessageBox>
+#include <QStyle>
 
 // ══════════════════════════════════════════════════════
 // GoalItemWidget
@@ -156,7 +157,7 @@ void GoalItemWidget::rebuildSteps()
 
     if (m_goal.steps.isEmpty()) {
         auto* lbl = new QLabel("(brak kroków — dodaj poniżej)", this);
-        lbl->setStyleSheet("color: #bbb; font-size: 11px; padding: 4px 2px;");
+        lbl->setObjectName("stepsEmpty");
         m_stepsLayout->addWidget(lbl);
     } else {
         for (const Step& s : m_goal.steps) {
@@ -168,10 +169,7 @@ void GoalItemWidget::rebuildSteps()
             auto* cb = new QCheckBox(s.label, row);
             cb->setObjectName("stepCheckbox");
             cb->setChecked(s.done);
-            cb->setStyleSheet(s.done
-                ? "QCheckBox { color: #bbb; text-decoration: line-through;"
-                  " font-size: 12px; padding: 3px 2px; }"
-                : "QCheckBox { font-size: 12px; padding: 3px 2px; }");
+            cb->setProperty("done", s.done);
 
             connect(cb, &QCheckBox::toggled, this,
                 [this, stepId = s.id, cb](bool checked) {
@@ -179,10 +177,9 @@ void GoalItemWidget::rebuildSteps()
                     for (Step& step : m_goal.steps) {
                         if (step.id == stepId) { step.done = checked; break; }
                     }
-                    cb->setStyleSheet(checked
-                        ? "QCheckBox { color: #bbb; text-decoration: line-through;"
-                          " font-size: 12px; padding: 3px 2px; }"
-                        : "QCheckBox { font-size: 12px; padding: 3px 2px; }");
+                    cb->setProperty("done", checked);
+                    cb->style()->unpolish(cb);
+                    cb->style()->polish(cb);
                     updateProgress();
                 });
 
@@ -192,7 +189,6 @@ void GoalItemWidget::rebuildSteps()
             delStep->setFlat(true);
             delStep->setCursor(Qt::PointingHandCursor);
             delStep->setToolTip("Usuń krok");
-            delStep->setStyleSheet("color: #bbb; font-size: 10px;");
             connect(delStep, &QPushButton::clicked, this,
                 [this, stepId = s.id]() {
                     DatabaseManager::instance().deleteStep(stepId);

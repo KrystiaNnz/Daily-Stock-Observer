@@ -25,12 +25,15 @@ private slots:
 
 private:
     void setupUi();
+    void updateInstrumentHints();
 
     TickerSearchEdit* m_tickerEdit     = nullptr;
     QLabel*           m_logoLabel      = nullptr;
+    QComboBox*        m_typeCombo      = nullptr;
     QLineEdit*        m_nameEdit       = nullptr;
     QDoubleSpinBox*   m_qtyEdit        = nullptr;
     QDoubleSpinBox*   m_priceEdit      = nullptr;
     QComboBox*        m_currencyCombo  = nullptr;
     QComboBox*        m_categoryCombo  = nullptr;
+    QLabel*           m_hintLabel      = nullptr;
 };

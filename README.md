@@ -2,7 +2,7 @@
 
 Daily Stock Observer is a local Windows desktop productivity and finance app built with C++ and Qt 6. It combines a daily calendar, goal tracking, portfolio tools, and an experimental world map module in one native application.
 
-The project is a work in progress and is mainly used as a learning and portfolio project. The current codebase focuses on desktop UI architecture, local persistence, Python integration, and finance-oriented tooling.
+The project is a work in progress and is mainly used as a hobby, learning, and portfolio project. It is developed primarily through "vibe coding": iterative experimentation, quick feedback loops, and learning by building. The current codebase focuses on desktop UI architecture, local persistence, Python integration, and finance-oriented tooling.
 
 ## Current Status
 
@@ -11,10 +11,12 @@ Work in progress. The core desktop structure is implemented and several modules 
 Implemented:
 
 - Main hub panel with dashboard metrics and quick navigation to the major modules
+- Data profiles: private and test profiles with separate SQLite databases, profile-specific settings, startup selector, and a visible test-profile badge
 - Basic XP/level/streak system in the main hub, driven by completed goal steps and calculator exercises
 - Daily calendar with event CRUD backed by SQLite
+- Popup dialogs constrained to the main app/screen, with scrollable content for larger windows
 - Goal tracking with steps, progress, long-term goals, and editable goal cards
-- Customizable color and display settings stored locally
+- Customizable color and display settings stored locally, including automatic text contrast for light/dark backgrounds
 - Portfolio panel with asset tracking and live quote fetching through Python/yfinance
 - Modular Qt widgets for calendar, planner, goals, portfolio, and map views
 - Custom Qt world map panel with tile loading, pan/zoom, country search, country borders, administrative regions, and local data source metadata
@@ -45,6 +47,8 @@ The app is organized around a Qt Widgets desktop shell with separate classes for
 Key components:
 
 - `MainWindow` - main application window and navigation
+- `ProfileManager` and `ProfileSelectionDialog` - data profile selection, startup preference, profile-specific data paths, and profile-specific settings names
+- `DialogUtils` - shared dialog sizing/positioning helper for keeping popups inside the main app or visible screen area
 - `MainHubPanel` - dashboard-style application hub with quick module access
 - `DatabaseManager` - SQLite access layer and application persistence
 - `CalendarView` - calendar and daily event list
@@ -56,7 +60,7 @@ Key components:
 - `CountryData`, `CountryBorders`, `CountrySubdivisions`, and `LocalDataSources` - local map metadata loaders
 - `CountryInfoDialog` and `RegionInfoDialog` - non-modal information dialogs for map selections
 
-SQLite is used for local app data. Python scripts are called as helper processes for workflows that benefit from the Python data ecosystem.
+SQLite is used for local app data. The database is stored per data profile under the app data directory, for example `profiles/private/daily_stock_observer.db` or `profiles/test/daily_stock_observer.db`. On the first private-profile run, an existing legacy database is copied into the new private profile location if the profile database does not exist yet. Python scripts are called as helper processes for workflows that benefit from the Python data ecosystem.
 
 ## Repository Layout
 

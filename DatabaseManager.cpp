@@ -1,9 +1,12 @@
 #include "DatabaseManager.h"
+#include "ProfileManager.h"
 
 #include <QSqlQuery>
 #include <QSqlError>
 #include <QStandardPaths>
 #include <QDir>
+#include <QFile>
+#include <QFileInfo>
 #include <QDebug>
 #include <QDateTime>
 #include <QSet>
@@ -19,10 +22,14 @@ bool DatabaseManager::init()
 {
     m_db = QSqlDatabase::addDatabase("QSQLITE");
 
-    // Zapisz baze danych w AppData/Roaming/DailyStockObserver/
-    QString dataPath = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-    QDir().mkpath(dataPath);
-    m_db.setDatabaseName(dataPath + "/daily_stock_observer.db");
+    const QString databasePath = ProfileManager::databasePath();
+    if (ProfileManager::activeProfileId() == "private" && !QFileInfo::exists(databasePath)) {
+        const QString legacyPath = ProfileManager::appDataRoot() + "/daily_stock_observer.db";
+        if (QFileInfo::exists(legacyPath))
+            QFile::copy(legacyPath, databasePath);
+    }
+
+    m_db.setDatabaseName(databasePath);
 
     if (!m_db.open()) {
         qDebug() << "Błąd otwarcia bazy:" << m_db.lastError().text();
@@ -128,6 +135,7 @@ bool DatabaseManager::init()
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
             ticker          TEXT    NOT NULL UNIQUE,
             name            TEXT,
+            asset_type      TEXT    DEFAULT 'Akcja',
             quantity        REAL    NOT NULL,
             avg_buy_price   REAL    NOT NULL,
             currency        TEXT    DEFAULT 'PLN',
@@ -140,6 +148,7 @@ bool DatabaseManager::init()
     }
     // Migracja: dodaj kolumnę category jeśli DB pochodzi ze starszej wersji
     q.exec("ALTER TABLE portfolio_assets ADD COLUMN category TEXT DEFAULT ''");
+    q.exec("ALTER TABLE portfolio_assets ADD COLUMN asset_type TEXT DEFAULT 'Akcja'");
 
     // Tabela transakcji portfela
     if (!q.exec(R"(
@@ -593,10 +602,11 @@ bool DatabaseManager::updateGoal(const Goal& goal)
 bool DatabaseManager::addAsset(PortfolioAsset& asset)
 {
     QSqlQuery q;
-    q.prepare("INSERT INTO portfolio_assets (ticker, name, quantity, avg_buy_price, currency, category) "
-              "VALUES (:ticker, :name, :qty, :price, :currency, :category)");
+    q.prepare("INSERT INTO portfolio_assets (ticker, name, asset_type, quantity, avg_buy_price, currency, category) "
+              "VALUES (:ticker, :name, :asset_type, :qty, :price, :currency, :category)");
     q.bindValue(":ticker",   asset.ticker.toUpper());
     q.bindValue(":name",     asset.name);
+    q.bindValue(":asset_type", asset.assetType.isEmpty() ? "Akcja" : asset.assetType);
     q.bindValue(":qty",      asset.quantity);
     q.bindValue(":price",    asset.avgBuyPrice);
     q.bindValue(":currency", asset.currency.isEmpty() ? "PLN" : asset.currency);
@@ -615,11 +625,12 @@ bool DatabaseManager::updateAsset(const PortfolioAsset& asset)
     QSqlQuery q;
     q.prepare("UPDATE portfolio_assets "
               "SET quantity = :qty, avg_buy_price = :price, name = :name, "
-              "currency = :currency, category = :category "
+              "asset_type = :asset_type, currency = :currency, category = :category "
               "WHERE id = :id");
     q.bindValue(":qty",      asset.quantity);
     q.bindValue(":price",    asset.avgBuyPrice);
     q.bindValue(":name",     asset.name);
+    q.bindValue(":asset_type", asset.assetType.isEmpty() ? "Akcja" : asset.assetType);
     q.bindValue(":currency", asset.currency);
     q.bindValue(":category", asset.category);
     q.bindValue(":id",       asset.id);
@@ -649,7 +660,7 @@ QList<PortfolioAsset> DatabaseManager::getAllAssets()
     QList<PortfolioAsset> assets;
 
     QSqlQuery q;
-    if (!q.exec("SELECT id, ticker, name, quantity, avg_buy_price, currency, category, added_at "
+    if (!q.exec("SELECT id, ticker, name, asset_type, quantity, avg_buy_price, currency, category, added_at "
                 "FROM portfolio_assets ORDER BY ticker ASC")) {
         qDebug() << "Błąd pobierania aktywów:" << q.lastError().text();
         return assets;
@@ -660,11 +671,14 @@ QList<PortfolioAsset> DatabaseManager::getAllAssets()
         a.id           = q.value(0).toInt();
         a.ticker       = q.value(1).toString();
         a.name         = q.value(2).toString();
-        a.quantity     = q.value(3).toDouble();
-        a.avgBuyPrice  = q.value(4).toDouble();
-        a.currency     = q.value(5).toString();
-        a.category     = q.value(6).toString();
-        a.addedAt      = q.value(7).toString();
+        a.assetType    = q.value(3).toString();
+        if (a.assetType.isEmpty())
+            a.assetType = "Akcja";
+        a.quantity     = q.value(4).toDouble();
+        a.avgBuyPrice  = q.value(5).toDouble();
+        a.currency     = q.value(6).toString();
+        a.category     = q.value(7).toString();
+        a.addedAt      = q.value(8).toString();
         assets.append(a);
     }
 

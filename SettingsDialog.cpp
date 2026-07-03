@@ -1,27 +1,56 @@
 #include "SettingsDialog.h"
+#include "DialogUtils.h"
 #include "PatternGen.h"
+#include "ProfileManager.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QFormLayout>
+#include <QFrame>
 #include <QGroupBox>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QToolButton>
 #include <QDialogButtonBox>
 #include <QLabel>
 #include <QColorDialog>
 #include <QRadioButton>
 #include <QButtonGroup>
+#include <QCheckBox>
+#include <QComboBox>
 #include <QSpinBox>
+
+namespace {
+QColor contrastTextFor(const QColor& background)
+{
+    const double luminance =
+        0.2126 * background.redF() +
+        0.7152 * background.greenF() +
+        0.0722 * background.blueF();
+    return luminance < 0.52 ? QColor("#ffffff") : QColor("#000000");
+}
+
+QColor blendColors(const QColor& foreground, const QColor& background, double foregroundWeight)
+{
+    const double bgWeight = 1.0 - foregroundWeight;
+    return QColor(
+        qBound(0, qRound(foreground.red() * foregroundWeight + background.red() * bgWeight), 255),
+        qBound(0, qRound(foreground.green() * foregroundWeight + background.green() * bgWeight), 255),
+        qBound(0, qRound(foreground.blue() * foregroundWeight + background.blue() * bgWeight), 255));
+}
+}
 
 SettingsDialog::SettingsDialog(const AppColors&       colors,
                                const DisplaySettings& display,
+                               const ProfileSettings& profile,
                                QWidget* parent)
-    : QDialog(parent), m_colors(colors), m_display(display)
+    : QDialog(parent), m_colors(colors), m_display(display), m_profile(profile)
 {
     setWindowTitle("Ustawienia - Daily Stock Observer");
     setMinimumWidth(440);
     setupUi();
+    applyContrastStyle();
+    DialogUtils::constrainToParent(this);
 }
 
 // ── Kolory ────────────────────────────────────────────────────────
@@ -41,8 +70,7 @@ void SettingsDialog::addColorRow(QFormLayout*  form,
     applyBtnStyle(outBtn, *colorPtr);
 
     outHex = new QLabel(colorPtr->name().toUpper(), this);
-    outHex->setStyleSheet(
-        "color: #555; font-family: Consolas, monospace; font-size: 13px;");
+    outHex->setObjectName("settingsHex");
 
     row->addWidget(outBtn);
     row->addWidget(outHex);
@@ -94,6 +122,9 @@ void SettingsDialog::resetToDefaults()
 
     applyBtnStyle(m_textBtn, m_colors.text);
     m_textHex->setText(m_colors.text.name().toUpper());
+    if (m_autoTextContrastCheck)
+        m_autoTextContrastCheck->setChecked(m_colors.autoTextContrast);
+    updateTextControls();
 
     m_patternGroup->button(static_cast<int>(PatternType::None))->setChecked(true);
     m_colors.patternMark = PatternGen::autoMark(m_colors.leftPanel);
@@ -114,17 +145,77 @@ void SettingsDialog::updateSizeEnabled()
     m_heightSpin->setEnabled(editable);
 }
 
+void SettingsDialog::updateTextControls()
+{
+    const bool manualText = !m_colors.autoTextContrast;
+    if (m_textBtn)
+        m_textBtn->setEnabled(manualText);
+    if (m_textHex)
+        m_textHex->setEnabled(manualText);
+}
+
+void SettingsDialog::applyContrastStyle()
+{
+    const QColor surface = m_colors.surface.isValid() ? m_colors.surface : QColor("#f5f5f6");
+    const QColor background = m_colors.appBg.isValid() ? m_colors.appBg : surface;
+    const QColor border = m_colors.border.isValid() ? m_colors.border : QColor("#d3d7dd");
+    const QColor accent = m_colors.accent.isValid() ? m_colors.accent : QColor("#3a2d97");
+    const QColor text = m_colors.autoTextContrast
+        ? contrastTextFor(surface)
+        : (m_colors.text.isValid() ? m_colors.text : QColor("#000000"));
+    const QColor bgText = m_colors.autoTextContrast ? contrastTextFor(background) : text;
+    const QColor muted = blendColors(text, surface, 0.62);
+    const QColor fieldBg = surface.lightness() < 128 ? surface.lighter(118) : QColor("#ffffff");
+    const QColor fieldText = contrastTextFor(fieldBg);
+
+    setStyleSheet(
+        "SettingsDialog { background: " + background.name() + "; color: " + bgText.name() + "; }\n"
+        "SettingsDialog QScrollArea, SettingsDialog QScrollArea > QWidget > QWidget { background: transparent; }\n"
+        "SettingsDialog QGroupBox { background: " + surface.name() + "; color: " + text.name() + ";"
+        " border: 1px solid " + border.name() + "; border-radius: 8px; margin-top: 10px; }\n"
+        "SettingsDialog QGroupBox::title { subcontrol-origin: margin; left: 10px;"
+        " padding: 0 4px; color: " + text.name() + "; }\n"
+        "SettingsDialog QLabel { color: " + text.name() + "; }\n"
+        "SettingsDialog QLabel#settingsHeading { color: " + bgText.name() + ";"
+        " font-size: 15px; font-weight: bold; }\n"
+        "SettingsDialog QLabel#settingsStrong { color: " + text.name() + "; font-weight: 600; }\n"
+        "SettingsDialog QLabel#settingsHint, SettingsDialog QLabel#settingsHex { color: " + muted.name() + "; }\n"
+        "SettingsDialog QLabel#settingsHex { font-family: Consolas, monospace; font-size: 13px; }\n"
+        "SettingsDialog QLineEdit, SettingsDialog QComboBox, SettingsDialog QSpinBox {"
+        " background: " + fieldBg.name() + "; color: " + fieldText.name() + ";"
+        " border: 1px solid " + border.name() + "; border-radius: 6px; padding: 5px 7px; }\n"
+        "SettingsDialog QSpinBox { padding-right: 28px; }\n"
+        "SettingsDialog QSpinBox::up-button, SettingsDialog QSpinBox::down-button {"
+        " subcontrol-origin: border; width: 20px; border-left: 1px solid " + border.name() + "; }\n"
+        "SettingsDialog QSpinBox::up-button { subcontrol-position: top right; }\n"
+        "SettingsDialog QSpinBox::down-button { subcontrol-position: bottom right; }\n"
+        "SettingsDialog QCheckBox, SettingsDialog QRadioButton { color: " + text.name() + "; }\n"
+        "SettingsDialog QDialogButtonBox QPushButton { background: " + accent.name() + ";"
+        " color: " + contrastTextFor(accent).name() + "; border: none; border-radius: 6px;"
+        " padding: 7px 14px; font-weight: 600; }\n");
+}
+
 // ── UI ────────────────────────────────────────────────────────────
 
 void SettingsDialog::setupUi()
 {
-    auto* main = new QVBoxLayout(this);
+    auto* outer = new QVBoxLayout(this);
+    outer->setSpacing(10);
+    outer->setContentsMargins(12, 12, 12, 12);
+
+    auto* scroll = new QScrollArea(this);
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    auto* content = new QWidget(scroll);
+    auto* main = new QVBoxLayout(content);
     main->setSpacing(16);
-    main->setContentsMargins(20, 20, 20, 20);
+    main->setContentsMargins(8, 8, 8, 8);
+    scroll->setWidget(content);
+    outer->addWidget(scroll, 1);
 
     // ── Sekcja: Kolory ────────────────────────────────────────────
     auto* colorHeading = new QLabel("Paleta kolorów", this);
-    colorHeading->setStyleSheet("font-size: 15px; font-weight: bold; color: #1a2535;");
+    colorHeading->setObjectName("settingsHeading");
     main->addWidget(colorHeading);
 
     auto* colorGroup = new QGroupBox("Kolory interfejsu", this);
@@ -141,6 +232,15 @@ void SettingsDialog::setupUi()
     addColorRow(form, "Obramowania",    &m_colors.border,     m_borderBtn,  m_borderHex);
     addColorRow(form, "Tekst",          &m_colors.text,       m_textBtn,    m_textHex);
 
+    m_autoTextContrastCheck = new QCheckBox("Automatyczny kontrast tekstu", this);
+    m_autoTextContrastCheck->setChecked(m_colors.autoTextContrast);
+    form->addRow("", m_autoTextContrastCheck);
+    connect(m_autoTextContrastCheck, &QCheckBox::toggled, this, [this](bool checked) {
+        m_colors.autoTextContrast = checked;
+        updateTextControls();
+    });
+    updateTextControls();
+
     auto* notarityBtn = new QPushButton("Preset Notarity", this);
     notarityBtn->setCursor(Qt::PointingHandCursor);
     notarityBtn->setStyleSheet(
@@ -155,6 +255,7 @@ void SettingsDialog::setupUi()
         m_colors.surface = QColor("#f5f5f6");
         m_colors.border = QColor("#d3d7dd");
         m_colors.text = QColor("#000000");
+        m_colors.autoTextContrast = true;
         m_colors.pattern = PatternType::None;
         m_colors.patternMark = QColor("#adadc2");
 
@@ -170,6 +271,9 @@ void SettingsDialog::setupUi()
         m_borderHex->setText(m_colors.border.name().toUpper());
         applyBtnStyle(m_textBtn, m_colors.text);
         m_textHex->setText(m_colors.text.name().toUpper());
+        if (m_autoTextContrastCheck)
+            m_autoTextContrastCheck->setChecked(m_colors.autoTextContrast);
+        updateTextControls();
         applyBtnStyle(m_patternMarkBtn, m_colors.patternMark);
         m_patternMarkHex->setText(m_colors.patternMark.name().toUpper());
         if (m_patternGroup && m_patternGroup->button(static_cast<int>(PatternType::None)))
@@ -180,7 +284,7 @@ void SettingsDialog::setupUi()
 
     // ── Sekcja: Wzory ─────────────────────────────────────────────
     auto* patHeading = new QLabel("Wzory tła", this);
-    patHeading->setStyleSheet("font-size: 15px; font-weight: bold; color: #1a2535;");
+    patHeading->setObjectName("settingsHeading");
     main->addWidget(patHeading);
 
     auto* patGroup = new QGroupBox("Wzór paska i panelu bocznego", this);
@@ -250,8 +354,7 @@ void SettingsDialog::setupUi()
     applyBtnStyle(m_patternMarkBtn, m_colors.patternMark);
 
     m_patternMarkHex = new QLabel(m_colors.patternMark.name().toUpper(), this);
-    m_patternMarkHex->setStyleSheet(
-        "color: #555; font-family: Consolas, monospace; font-size: 13px;");
+    m_patternMarkHex->setObjectName("settingsHex");
 
     auto* autoMarkBtn = new QPushButton("Auto ↺", this);
     autoMarkBtn->setFlat(true);
@@ -291,7 +394,7 @@ void SettingsDialog::setupUi()
 
     // ── Sekcja: Wyświetlanie ──────────────────────────────────────
     auto* dispHeading = new QLabel("Wyświetlanie", this);
-    dispHeading->setStyleSheet("font-size: 15px; font-weight: bold; color: #1a2535;");
+    dispHeading->setObjectName("settingsHeading");
     main->addWidget(dispHeading);
 
     auto* dispGroup  = new QGroupBox("Tryb okna", this);
@@ -331,12 +434,12 @@ void SettingsDialog::setupUi()
     m_widthSpin->setRange(640, 3840);
     m_widthSpin->setValue(m_display.width);
     m_widthSpin->setSuffix(" px");
-    m_widthSpin->setFixedWidth(90);
+    m_widthSpin->setFixedWidth(112);
 
     m_heightSpin->setRange(480, 2160);
     m_heightSpin->setValue(m_display.height);
     m_heightSpin->setSuffix(" px");
-    m_heightSpin->setFixedWidth(90);
+    m_heightSpin->setFixedWidth(112);
 
     sizeRow->addWidget(sizeLabel);
     sizeRow->addWidget(m_widthSpin);
@@ -377,6 +480,44 @@ void SettingsDialog::setupUi()
 
     main->addWidget(dispGroup);
 
+    auto* profileHeading = new QLabel("Profil danych", this);
+    profileHeading->setObjectName("settingsHeading");
+    main->addWidget(profileHeading);
+
+    auto* profileGroup = new QGroupBox("Dane uzytkownika", this);
+    auto* profileLayout = new QVBoxLayout(profileGroup);
+    profileLayout->setSpacing(10);
+    profileLayout->setContentsMargins(16, 18, 16, 16);
+
+    const DataProfile activeProfile = ProfileManager::profile(m_profile.activeProfileId);
+    auto* activeLabel = new QLabel("Aktywny profil: " + activeProfile.name, this);
+    activeLabel->setObjectName("settingsStrong");
+    profileLayout->addWidget(activeLabel);
+
+    auto* profileRow = new QHBoxLayout();
+    profileRow->setSpacing(8);
+    profileRow->addWidget(new QLabel("Profil po restarcie:", this));
+    m_profileCombo = new QComboBox(this);
+    for (const DataProfile& profile : ProfileManager::profiles())
+        m_profileCombo->addItem(profile.name, profile.id);
+    const int profileIndex = m_profileCombo->findData(m_profile.selectedProfileId);
+    m_profileCombo->setCurrentIndex(profileIndex >= 0 ? profileIndex : 0);
+    profileRow->addWidget(m_profileCombo, 1);
+    profileLayout->addLayout(profileRow);
+
+    m_askProfileAtStartup = new QCheckBox("Pytaj o profil przy starcie", this);
+    m_askProfileAtStartup->setChecked(m_profile.askAtStartup);
+    profileLayout->addWidget(m_askProfileAtStartup);
+
+    auto* profileHint = new QLabel(
+        "Zmiana profilu zostanie zastosowana po ponownym uruchomieniu aplikacji.",
+        this);
+    profileHint->setWordWrap(true);
+    profileHint->setObjectName("settingsHint");
+    profileLayout->addWidget(profileHint);
+
+    main->addWidget(profileGroup);
+
     // Aktualizuj aktywność spinboxów przy zmianie trybu
     connect(modeGroup, &QButtonGroup::buttonClicked, this,
             [this](QAbstractButton*) { updateSizeEnabled(); });
@@ -391,7 +532,7 @@ void SettingsDialog::setupUi()
         "border: none; background: none; padding: 2px; }"
         "QPushButton:hover { color: #333; }");
     connect(resetBtn, &QPushButton::clicked, this, &SettingsDialog::resetToDefaults);
-    main->addWidget(resetBtn, 0, Qt::AlignLeft);
+    outer->addWidget(resetBtn, 0, Qt::AlignLeft);
 
     auto* btns = new QDialogButtonBox(
         QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
@@ -404,8 +545,12 @@ void SettingsDialog::setupUi()
         else                                       m_display.mode = WindowMode::FullScreen;
         m_display.width  = m_widthSpin->value();
         m_display.height = m_heightSpin->value();
+        if (m_profileCombo)
+            m_profile.selectedProfileId = m_profileCombo->currentData().toString();
+        if (m_askProfileAtStartup)
+            m_profile.askAtStartup = m_askProfileAtStartup->isChecked();
         accept();
     });
     connect(btns, &QDialogButtonBox::rejected, this, &QDialog::reject);
-    main->addWidget(btns);
+    outer->addWidget(btns);
 }

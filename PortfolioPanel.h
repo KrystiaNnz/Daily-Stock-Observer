@@ -38,10 +38,10 @@ private:
     void updateSummary();
     void setRefreshing(bool active);
     void applyFilter();
-    void rebuildFilterCombo();
+    void rebuildFilterCombos();
 
     // Kolumny tabeli
-    enum Col { Ticker, Nazwa, Kategoria, Ilosc, CenaZakupu, KursLive, Wartosc, PnlPln, PnlPct, ColCount };
+    enum Col { Ticker, Nazwa, Typ, Kategoria, Ilosc, CenaZakupu, KursLive, Wartosc, PnlPln, PnlPct, ColCount };
 
     QTableWidget*        m_table          = nullptr;
     QLabel*              m_summaryLabel   = nullptr;
@@ -49,6 +49,7 @@ private:
     QPushButton*         m_addBtn         = nullptr;
     QPushButton*         m_deleteBtn      = nullptr;
     QPushButton*         m_refreshBtn     = nullptr;
+    QComboBox*           m_typeFilterCombo = nullptr;
     QComboBox*           m_filterCombo    = nullptr;
     QSplitter*            m_splitter       = nullptr;
     QTabWidget*           m_bottomTabs    = nullptr;

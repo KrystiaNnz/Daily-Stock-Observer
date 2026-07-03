@@ -69,9 +69,14 @@ void PortfolioPanel::setupUi()
     toolbar->addWidget(m_statusLabel);
 
     // ── Filtr kategorii ───────────────────────────────
+    m_typeFilterCombo = new QComboBox(this);
+    m_typeFilterCombo->addItem("Wszystkie typy");
+    m_typeFilterCombo->setMinimumWidth(160);
+    toolbar->addWidget(m_typeFilterCombo);
+
     m_filterCombo = new QComboBox(this);
     m_filterCombo->addItem("Wszystkie kategorie");
-    m_filterCombo->setMinimumWidth(200);
+    m_filterCombo->setMinimumWidth(180);
     toolbar->addWidget(m_filterCombo);
 
     m_refreshBtn = new QPushButton("Odśwież kursy", this);
@@ -101,11 +106,12 @@ void PortfolioPanel::setupUi()
     // ── Tabela ────────────────────────────────────────
     m_table = new QTableWidget(0, ColCount, this);
     m_table->setHorizontalHeaderLabels({
-        "Ticker", "Nazwa", "Kategoria", "Ilość", "Cena zakupu",
+        "Ticker", "Nazwa", "Typ", "Kategoria", "Ilość", "Cena zakupu",
         "Kurs live", "Wartość", "P&L (PLN)", "P&L (%)"
     });
 
     m_table->horizontalHeader()->setSectionResizeMode(Nazwa,      QHeaderView::Stretch);
+    m_table->horizontalHeader()->setSectionResizeMode(Typ,        QHeaderView::ResizeToContents);
     m_table->horizontalHeader()->setSectionResizeMode(Kategoria,  QHeaderView::ResizeToContents);
     m_table->horizontalHeader()->setSectionResizeMode(Ticker,     QHeaderView::ResizeToContents);
     m_table->horizontalHeader()->setSectionResizeMode(Ilosc,      QHeaderView::ResizeToContents);
@@ -149,6 +155,8 @@ void PortfolioPanel::setupUi()
     connect(m_addBtn,     &QPushButton::clicked, this, &PortfolioPanel::onAddAsset);
     connect(m_deleteBtn,  &QPushButton::clicked, this, &PortfolioPanel::onDeleteAsset);
     connect(m_refreshBtn, &QPushButton::clicked, this, &PortfolioPanel::onRefreshPrices);
+    connect(m_typeFilterCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, &PortfolioPanel::onFilterChanged);
     connect(m_filterCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &PortfolioPanel::onFilterChanged);
     connect(m_table->selectionModel(), &QItemSelectionModel::selectionChanged,
@@ -170,6 +178,7 @@ void PortfolioPanel::refreshTable()
 
         m_table->setItem(row, Ticker,     roItem(a.ticker));
         m_table->setItem(row, Nazwa,      roItem(a.name));
+        m_table->setItem(row, Typ,        roItem(a.assetType.isEmpty() ? "Akcja" : a.assetType));
         m_table->setItem(row, Kategoria,  roItem(a.category));
         m_table->setItem(row, Ilosc,      roItemNum(a.quantity, 4));
         m_table->setItem(row, CenaZakupu, roItemNum(a.avgBuyPrice, 4));
@@ -184,7 +193,7 @@ void PortfolioPanel::refreshTable()
     }
 
     m_table->setSortingEnabled(true);
-    rebuildFilterCombo();
+    rebuildFilterCombos();
     applyFilter();
     updateSummary();
 
@@ -241,6 +250,9 @@ void PortfolioPanel::onRefreshPrices()
     for (int r = 0; r < m_table->rowCount(); ++r) {
         QString ticker   = m_table->item(r, Ticker)->text();
         QString currency = m_table->item(r, Ticker)->data(Qt::UserRole + 1).toString();
+        QString assetType = m_table->item(r, Typ)->text();
+        if (assetType == "Obligacja rządowa" || assetType == "Obligacja korporacyjna")
+            continue;
         tickers << (currency.isEmpty() ? ticker : ticker + ":" + currency);
     }
 
@@ -386,17 +398,32 @@ void PortfolioPanel::setRefreshing(bool active)
     }
 }
 
-void PortfolioPanel::rebuildFilterCombo()
+void PortfolioPanel::rebuildFilterCombos()
 {
-    QString current = m_filterCombo->currentText();
+    QString currentType = m_typeFilterCombo->currentText();
+    QString currentCat = m_filterCombo->currentText();
 
-    // Zbierz unikalne kategorie z tabeli
+    QSet<QString> types;
     QSet<QString> cats;
     for (int r = 0; r < m_table->rowCount(); ++r) {
+        QString type = m_table->item(r, Typ)->text().trimmed();
         QString cat = m_table->item(r, Kategoria)->text().trimmed();
+        if (!type.isEmpty())
+            types.insert(type);
         if (!cat.isEmpty())
             cats.insert(cat);
     }
+
+    m_typeFilterCombo->blockSignals(true);
+    m_typeFilterCombo->clear();
+    m_typeFilterCombo->addItem("Wszystkie typy");
+    QStringList sortedTypes = QStringList(types.begin(), types.end());
+    sortedTypes.sort();
+    m_typeFilterCombo->addItems(sortedTypes);
+
+    int typeIdx = m_typeFilterCombo->findText(currentType);
+    m_typeFilterCombo->setCurrentIndex(typeIdx >= 0 ? typeIdx : 0);
+    m_typeFilterCombo->blockSignals(false);
 
     m_filterCombo->blockSignals(true);
     m_filterCombo->clear();
@@ -405,19 +432,24 @@ void PortfolioPanel::rebuildFilterCombo()
     sorted.sort();
     m_filterCombo->addItems(sorted);
 
-    int idx = m_filterCombo->findText(current);
+    int idx = m_filterCombo->findText(currentCat);
     m_filterCombo->setCurrentIndex(idx >= 0 ? idx : 0);
     m_filterCombo->blockSignals(false);
 }
 
 void PortfolioPanel::applyFilter()
 {
-    QString filter = m_filterCombo->currentText();
-    bool showAll   = (filter == "Wszystkie kategorie" || m_filterCombo->currentIndex() == 0);
+    QString typeFilter = m_typeFilterCombo->currentText();
+    QString catFilter = m_filterCombo->currentText();
+    bool showAllTypes = (typeFilter == "Wszystkie typy" || m_typeFilterCombo->currentIndex() == 0);
+    bool showAllCats = (catFilter == "Wszystkie kategorie" || m_filterCombo->currentIndex() == 0);
 
     for (int r = 0; r < m_table->rowCount(); ++r) {
-        bool match = showAll ||
-                     m_table->item(r, Kategoria)->text().trimmed() == filter;
+        bool matchType = showAllTypes ||
+                         m_table->item(r, Typ)->text().trimmed() == typeFilter;
+        bool matchCat = showAllCats ||
+                        m_table->item(r, Kategoria)->text().trimmed() == catFilter;
+        bool match = matchType && matchCat;
         m_table->setRowHidden(r, !match);
     }
     updateSummary();

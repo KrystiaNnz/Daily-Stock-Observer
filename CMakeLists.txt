@@ -65,6 +65,12 @@ qt_add_executable(DailyStockObserver
     FinancialCalculatorPanel.cpp
     MainHubPanel.h
     MainHubPanel.cpp
+    ProfileManager.h
+    ProfileManager.cpp
+    ProfileSelectionDialog.h
+    ProfileSelectionDialog.cpp
+    DialogUtils.h
+    DialogUtils.cpp
     resources.qrc
 )
 

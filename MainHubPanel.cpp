@@ -1,5 +1,6 @@
 #include "MainHubPanel.h"
 #include "DatabaseManager.h"
+#include "ProfileManager.h"
 
 #include <QDate>
 #include <QFrame>
@@ -9,6 +10,7 @@
 #include <QLocale>
 #include <QProgressBar>
 #include <QPushButton>
+#include <QStyle>
 #include <QVBoxLayout>
 
 MainHubPanel::MainHubPanel(QWidget* parent)
@@ -41,6 +43,11 @@ void MainHubPanel::setupUi()
     titleBlock->addWidget(m_dateLabel);
 
     headerRow->addLayout(titleBlock);
+    headerRow->addStretch();
+
+    m_profileLabel = new QLabel(this);
+    m_profileLabel->setObjectName("hubProfileBadge");
+    headerRow->addWidget(m_profileLabel);
 
     auto* xpFrame = new QFrame(this);
     xpFrame->setObjectName("hubXpCard");
@@ -193,6 +200,14 @@ QFrame* MainHubPanel::createModuleCard(const QString& title,
 
 void MainHubPanel::refresh()
 {
+    const DataProfile profile = ProfileManager::activeProfile();
+    if (m_profileLabel) {
+        m_profileLabel->setText(profile.isTest ? "Profil testowy" : "Profil prywatny");
+        m_profileLabel->setProperty("testProfile", profile.isTest);
+        m_profileLabel->style()->unpolish(m_profileLabel);
+        m_profileLabel->style()->polish(m_profileLabel);
+    }
+
     const QDate today = QDate::currentDate();
     const QString dateKey = today.toString("yyyy-MM-dd");
     QString dateText = QLocale(QLocale::Polish, QLocale::Poland)

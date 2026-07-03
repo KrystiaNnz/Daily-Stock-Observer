@@ -1,4 +1,5 @@
 #include "AddAssetDialog.h"
+#include "DialogUtils.h"
 #include "TickerSearchEdit.h"
 
 #include <QVBoxLayout>
@@ -8,9 +9,11 @@
 #include <QDoubleSpinBox>
 #include <QComboBox>
 #include <QDialogButtonBox>
+#include <QFrame>
 #include <QLabel>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QDate>
 #include <QPixmap>
 
@@ -20,13 +23,24 @@ AddAssetDialog::AddAssetDialog(QWidget* parent)
     setWindowTitle("Dodaj aktywo");
     setMinimumWidth(420);
     setupUi();
+    DialogUtils::constrainToParent(this);
 }
 
 void AddAssetDialog::setupUi()
 {
-    auto* main = new QVBoxLayout(this);
+    auto* outer = new QVBoxLayout(this);
+    outer->setSpacing(10);
+    outer->setContentsMargins(12, 12, 12, 12);
+
+    auto* scroll = new QScrollArea(this);
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    auto* content = new QWidget(scroll);
+    auto* main = new QVBoxLayout(content);
     main->setSpacing(12);
-    main->setContentsMargins(20, 20, 20, 20);
+    main->setContentsMargins(8, 8, 8, 8);
+    scroll->setWidget(content);
+    outer->addWidget(scroll, 1);
 
     auto* form = new QFormLayout();
     form->setSpacing(10);
@@ -46,6 +60,18 @@ void AddAssetDialog::setupUi()
     tickerRow->addWidget(m_logoLabel);
     tickerRow->addWidget(m_tickerEdit, 1);
     form->addRow("Ticker *", tickerRow);
+
+    m_typeCombo = new QComboBox(this);
+    m_typeCombo->addItems({
+        "Akcja",
+        "ETF",
+        "Obligacja rządowa",
+        "Obligacja korporacyjna",
+        "Kryptowaluta",
+        "Kontrakt na surowce",
+        "Inne",
+    });
+    form->addRow("Typ instrumentu", m_typeCombo);
 
     // ── Nazwa (auto-wypełniana po wyborze) ────────────
     m_nameEdit = new QLineEdit(this);
@@ -133,14 +159,10 @@ void AddAssetDialog::setupUi()
     main->addLayout(form);
 
     // Hint
-    auto* hint = new QLabel(
-        "<small style='color:#999'>"
-        "Ticker GPW: sufiks <b>.WA</b> (np. <b>CDR.WA</b>) &nbsp;|&nbsp; "
-        "US: bez sufiksu (np. <b>AAPL</b>) &nbsp;|&nbsp; "
-        "Crypto: sufiks <b>-USD</b> (np. <b>BTC-USD</b>)"
-        "</small>", this);
-    hint->setTextFormat(Qt::RichText);
-    main->addWidget(hint);
+    m_hintLabel = new QLabel(this);
+    m_hintLabel->setTextFormat(Qt::RichText);
+    m_hintLabel->setWordWrap(true);
+    main->addWidget(m_hintLabel);
 
     // Przyciski
     auto* btns = new QDialogButtonBox(
@@ -161,13 +183,53 @@ void AddAssetDialog::setupUi()
         accept();
     });
     connect(btns, &QDialogButtonBox::rejected, this, &QDialog::reject);
-    main->addWidget(btns);
+    outer->addWidget(btns);
+
+    connect(m_typeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, &AddAssetDialog::updateInstrumentHints);
 
     // Sygnały TickerSearchEdit
     connect(m_tickerEdit, &TickerSearchEdit::tickerSelected,
             this, &AddAssetDialog::onTickerSelected);
     connect(m_tickerEdit, &TickerSearchEdit::logoReady,
             this, &AddAssetDialog::onLogoReady);
+
+    updateInstrumentHints();
+}
+
+void AddAssetDialog::updateInstrumentHints()
+{
+    const QString type = m_typeCombo->currentText();
+    QString placeholder = "Wpisz nazwę lub ticker, np. cdprojekt, AAPL...";
+    QString hint =
+        "Ticker GPW: sufiks <b>.WA</b> (np. <b>CDR.WA</b>) &nbsp;|&nbsp; "
+        "US: bez sufiksu (np. <b>AAPL</b>)";
+
+    if (type == "ETF") {
+        placeholder = "Wpisz ETF, np. VWCE.DE, CSPX.L, SPY...";
+        hint = "ETF-y zwykle działają jak akcje: wpisz ticker z giełdy, np. <b>VWCE.DE</b>, <b>CSPX.L</b>, <b>SPY</b>.";
+    } else if (type == "Kryptowaluta") {
+        placeholder = "Wpisz krypto, np. BTC-USD, ETH-USD...";
+        hint = "Krypto w Yahoo Finance najczęściej ma format <b>BTC-USD</b>, <b>ETH-USD</b>, <b>SOL-USD</b>.";
+        int usd = m_currencyCombo->findText("USD");
+        if (usd >= 0)
+            m_currencyCombo->setCurrentIndex(usd);
+    } else if (type == "Obligacja rządowa" || type == "Obligacja korporacyjna") {
+        placeholder = "Wpisz ticker, ISIN albo własny identyfikator obligacji...";
+        hint = "Dla pojedynczych obligacji możesz wpisać ISIN lub własny symbol. Jeśli nie ma live tickera, pozycja zostanie w portfelu z ceną zakupu bez kursu live.";
+    } else if (type == "Kontrakt na surowce") {
+        placeholder = "Wpisz kontrakt, np. GC=F, CL=F, SI=F...";
+        hint = "Kontrakty surowcowe w Yahoo Finance zwykle kończą się <b>=F</b>, np. złoto <b>GC=F</b>, ropa WTI <b>CL=F</b>, srebro <b>SI=F</b>.";
+        int usd = m_currencyCombo->findText("USD");
+        if (usd >= 0)
+            m_currencyCombo->setCurrentIndex(usd);
+    } else if (type == "Inne") {
+        placeholder = "Wpisz ticker, ISIN albo własny identyfikator...";
+        hint = "Możesz dodać instrument niestandardowy. Live kurs zadziała tylko wtedy, gdy symbol rozpozna dostawca danych.";
+    }
+
+    m_tickerEdit->setPlaceholderText(placeholder);
+    m_hintLabel->setText("<small style='color:#999'>" + hint + "</small>");
 }
 
 void AddAssetDialog::onTickerSelected(const QString& /*ticker*/, const QString& name)
@@ -193,6 +255,7 @@ PortfolioAsset AddAssetDialog::getAsset() const
     PortfolioAsset a;
     a.ticker      = m_tickerEdit->text().trimmed().toUpper();
     a.name        = m_nameEdit->text().trimmed();
+    a.assetType   = m_typeCombo->currentText();
     a.quantity    = m_qtyEdit->value();
     a.avgBuyPrice = m_priceEdit->value();
     a.currency    = m_currencyCombo->currentText();

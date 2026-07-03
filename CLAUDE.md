@@ -41,9 +41,17 @@ pip install yfinance
 
 Wszystkie skrypty piszą JSON na stdout i błędy na stderr. Nigdy nie drukują nic innego na stdout.
 
+## Profile danych
+
+`ProfileManager` obsluguje dwa stale profile danych: `private` / Prywatny oraz `test` / Testowy.
+
+Przy pierwszym starcie albo po wlaczeniu opcji `Pytaj o profil przy starcie` aplikacja pokazuje `ProfileSelectionDialog`. Sekcja `Profil danych` w `SettingsDialog` pozwala wybrac profil na kolejny start i wlaczyc pytanie przy starcie. Zmiana profilu z ustawien nie przeladowuje bazy w locie; zapisuje wybor w `QSettings("Kryst", "DailyStockObserverLauncher")` i wymaga restartu aplikacji.
+
+Profil testowy ma widoczny bezpiecznik: tytul okna `Daily Stock Observer - TEST`, napis `Daily Stock Observer [TEST]` w tab barze oraz badge `Profil testowy` w `MainHubPanel`.
+
 ## Baza danych
 
-SQLite pod `%APPDATA%/Kryst/DailyStockObserver/daily_stock_observer.db` (`QStandardPaths::AppDataLocation`). `DatabaseManager` to Singleton — jedyna klasa która dotyka bazy. PRAGMA `foreign_keys = ON` włączone przy starcie. Schematy tabel tworzone przez `CREATE TABLE IF NOT EXISTS` — zero migracji.
+SQLite jest rozdzielone per profil danych: `%APPDATA%/Kryst/DailyStockObserver/profiles/<profile-id>/daily_stock_observer.db` (`QStandardPaths::AppDataLocation`). Przy pierwszym starcie profilu `private`, jesli nowa baza profilu jeszcze nie istnieje, `DatabaseManager` kopiuje stara baze z `%APPDATA%/Kryst/DailyStockObserver/daily_stock_observer.db` do profilu prywatnego. `DatabaseManager` to Singleton — jedyna klasa która dotyka bazy. PRAGMA `foreign_keys = ON` włączone przy starcie. Schematy tabel tworzone przez `CREATE TABLE IF NOT EXISTS` — zero migracji.
 
 ## Architektura
 
@@ -68,9 +76,21 @@ Kalkulator moze przyznawac XP przez `DatabaseManager::awardExperience(source, xp
 
 `FinancialCalculatorPanel` ma dwa tryby źródła danych: ręczne wpisywanie oraz zaciągnięcie danych z portfela. Obecny most portfelowy pobiera z `DatabaseManager::getAllAssets()` wybrane aktywo i uzupełnia kalkulator akcji średnią ceną zakupu (`avg_buy_price`) jako `C_k`; cena sprzedaży/current price, dywidendy i dalszy model danych portfelowych pozostają do zaprojektowania później.
 
+### Dialogi
+
+`DialogUtils::constrainToParent(QDialog*)` ogranicza wyskakujace okna do ok. 92% rozmiaru glownego okna aplikacji albo ekranu, a nastepnie centruje je w tym obszarze. Uzywac go w nowych dialogach po `setupUi()`.
+
+Wieksze dialogi powinny miec strukture: zewnetrzny `QVBoxLayout`, `QScrollArea` z trescia jako pierwszy element oraz `QDialogButtonBox` poza scrollem na dole. Ten wzorzec jest juz zastosowany w `SettingsDialog`, `CountryInfoDialog`, `RegionInfoDialog` i `AddAssetDialog`.
+
 ### Styl wizualny
 
-`AppColors` (accent, leftPanel, appBg, surface, border, text, PatternType, patternMark) i `DisplaySettings` (WindowMode, width, height) są persystowane przez `QSettings("Kryst", "DailyStockObserver")`. Domyslna paleta bazuje na Notarity: `#d8e1e6`, `#f5f5f6`, `#d3d7dd`, `#3a2d97`, `#adadc2`, `#000000`; dialog ustawien ma tez przycisk `Preset Notarity`.
+`AppColors` (accent, leftPanel, appBg, surface, border, text, autoTextContrast, PatternType, patternMark) i `DisplaySettings` (WindowMode, width, height) sa persystowane per profil przez `QSettings("Kryst", ProfileManager::profileSettingsAppName())`, np. `DailyStockObserver_private` albo `DailyStockObserver_test`. Domyslna paleta bazuje na Notarity: `#d8e1e6`, `#f5f5f6`, `#d3d7dd`, `#3a2d97`, `#adadc2`, `#000000`; dialog ustawien ma tez przycisk `Preset Notarity`.
+
+Checkbox `Automatyczny kontrast tekstu` jest domyslnie wlaczony. Gdy jest wlaczony, `MainWindow::applyStyle()` ignoruje reczny kolor `text` i liczy kontrast osobno dla tla aplikacji, powierzchni/kart oraz lewego panelu. Stale szarosci pomocnicze w glownym QSS sa wyprowadzane z aktywnego tla, zeby tekst nie zlewal sie z jasnym albo ciemnym motywem.
+
+Zasada dla nowych paneli i dialogow: nie wpisywac lokalnie stalych kolorow tekstu typu `#777`, `#999`, `#bbb` ani bialego tekstu bez jawnego tla. Preferowac `setObjectName(...)` i dopisanie stylu w `MainWindow::applyStyle()`, gdzie dostepne sa kolory `bgTextColor`, `surfaceTextColor`, `fieldText`, `surfaceMutedText` itd. Bazowy QSS jest ustawiany przez `qApp->setStyleSheet(appStyle)`, wiec obejmuje tez wyskakujace okna. Kontrolki formularzy (`QLineEdit`, `QTextEdit`, `QPlainTextEdit`, `QComboBox`, `QAbstractSpinBox`), tabele, taby, checkboxy/radio i lista celow maja juz globalny styl kontrastowy. `SettingsDialog` ma dodatkowo `applyContrastStyle()`, bo zawiera wiele wlasnych sekcji i podgladow.
+
+Dla `QSpinBox` / `QAbstractSpinBox` zostawiac rezerwe na przyciski strzalek: globalny QSS ustawia `padding-right: 28px` i szerokosc subkontrolek strzalek, a pola z sufiksem typu `px` nie powinny byc zbyt waskie. W `SettingsDialog` spinboxy rozmiaru okna maja 112 px szerokosci, zeby wartosci typu `1440 px` nie nachodzily na strzalki.
 
 `MainWindow::applyStyle()` generuje jeden duży string QSS wyliczając wszystkie kolory pochodne (hover, pressed, selection) z trzech bazowych kolorów. **Tło tabBar i lewego panelu nie jest malowane przez CSS** — maluje je `eventFilter` przez `QPainter` + `PatternGen::generate()` (kafelkowanie: Zebra, Leopard, Butterfly, Dots, Stars).
 
@@ -99,6 +119,8 @@ Cztery fetchery (`PortfolioFetcher`, `CompanyAnalyzer`, `PeersFetcher`, `EdgarFe
 - `CompanyAnalysisPanel` — wywołuje `CompanyAnalyzer::analyze(ticker)` po kliknięciu wiersza
 - `PeersPanel` — wywołuje `PeersFetcher::fetchPeers(ticker)` + rysuje `WorldHeatmapWidget`
 
+`PortfolioAsset` ma `assetType` rozdzielony od `category`: typ instrumentu to m.in. `Akcja`, `ETF`, `Obligacja rządowa`, `Obligacja korporacyjna`, `Kryptowaluta`, `Kontrakt na surowce`, `Inne`, a `category` zostaje sektorem/tematem. `portfolio_assets.asset_type` jest migrowane przez `ALTER TABLE ... ADD COLUMN` z domyślnym `Akcja`. `PortfolioPanel` pokazuje kolumnę `Typ` i ma osobne filtry po typie oraz kategorii. `AddAssetDialog` pokazuje podpowiedzi tickerów per typ instrumentu: ETF-y i kontrakty surowcowe używają tickerów giełdowych/Yahoo Finance, krypto zwykle `BTC-USD`, a obligacje można wpisać po tickerze, ISIN albo własnym identyfikatorze. Pojedyncze obligacje są pomijane przy automatycznym `PortfolioFetcher::fetchPrices()`.
+
 `WorldHeatmapWidget` to czysty `QWidget` z `paintEvent` — rysuje bąbelki na uproszczonej mapie świata per kraj (bez WebEngine).
 
 ### MapPanel
@@ -110,4 +132,4 @@ Wlasny `QWidget` z kafelkami mapy przez `TileManager` + `QNetworkAccessManager`.
 - Toolbar: wyszukiwarka kraju/miasta przez Nominatim Search, przyciski `+`, `-`, reset `Europa`.
 - Klik mapy odpytuje Nominatim Reverse Geocoding, po rozpoznaniu kraju otwiera `CountryInfoDialog`.
 - `CountryData` trzyma lokalna baze metadanych kraju po ISO; dialog pokazuje stolice, populacje, PKB, walute, jezyki, kontynent i powierzchnie.
-- Notatki w `CountryInfoDialog` sa zapisywane per ISO w `QSettings("Kryst", "DailyStockObserver")`.
+- Notatki w `CountryInfoDialog` sa zapisywane per ISO i per profil w `QSettings("Kryst", ProfileManager::profileSettingsAppName())`.

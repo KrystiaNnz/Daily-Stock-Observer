@@ -1,4 +1,5 @@
 #include "AddEventDialog.h"
+#include "DialogUtils.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -19,6 +20,7 @@ AddEventDialog::AddEventDialog(const QDate& date, QWidget* parent)
     setupUi(date);
     setWindowTitle("Dodaj wydarzenie");
     setMinimumWidth(380);
+    DialogUtils::constrainToParent(this);
 }
 
 void AddEventDialog::setupUi(const QDate& date)

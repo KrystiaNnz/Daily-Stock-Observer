@@ -1,12 +1,15 @@
 #include "CountryInfoDialog.h"
 #include "CountryData.h"
+#include "DialogUtils.h"
 #include "LocalDataSources.h"
+#include "ProfileManager.h"
 
 #include <QDialogButtonBox>
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QSettings>
 #include <QTextEdit>
 #include <QVBoxLayout>
@@ -21,6 +24,7 @@ CountryInfoDialog::CountryInfoDialog(const QString& name, const QString& isoCode
     setWindowTitle(info.name);
     setMinimumWidth(460);
     setMaximumWidth(560);
+    DialogUtils::constrainToParent(this);
     setStyleSheet(
         "CountryInfoDialog { background: #ffffff; color: #1f2937; }"
         "QLabel { background: transparent; }"
@@ -32,9 +36,19 @@ CountryInfoDialog::CountryInfoDialog(const QString& name, const QString& isoCode
         " font-weight: 600; }"
         "QPushButton#centralBankBtn:hover { background: #dbeafe; }");
 
-    auto* root = new QVBoxLayout(this);
+    auto* outer = new QVBoxLayout(this);
+    outer->setSpacing(10);
+    outer->setContentsMargins(12, 12, 12, 12);
+
+    auto* scroll = new QScrollArea(this);
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    auto* content = new QWidget(scroll);
+    auto* root = new QVBoxLayout(content);
     root->setSpacing(12);
-    root->setContentsMargins(24, 20, 24, 20);
+    root->setContentsMargins(12, 8, 12, 8);
+    scroll->setWidget(content);
+    outer->addWidget(scroll, 1);
 
     auto* nameLabel = new QLabel(info.name, this);
     nameLabel->setStyleSheet("font-size:22px; font-weight:bold; color:#111827;");
@@ -132,7 +146,7 @@ CountryInfoDialog::CountryInfoDialog(const QString& name, const QString& isoCode
         saveNotes();
         reject();
     });
-    root->addWidget(buttons);
+    outer->addWidget(buttons);
 }
 
 void CountryInfoDialog::addInfoRow(QVBoxLayout* root, const QString& label, const QString& value)
@@ -190,7 +204,7 @@ void CountryInfoDialog::loadNotes()
 {
     if (!m_notesEdit || m_isoCode.isEmpty()) return;
 
-    QSettings settings("Kryst", "DailyStockObserver");
+    QSettings settings("Kryst", ProfileManager::profileSettingsAppName());
     m_notesEdit->setPlainText(settings.value("countryNotes/" + m_isoCode).toString());
 }
 
@@ -198,6 +212,6 @@ void CountryInfoDialog::saveNotes()
 {
     if (!m_notesEdit || m_isoCode.isEmpty()) return;
 
-    QSettings settings("Kryst", "DailyStockObserver");
+    QSettings settings("Kryst", ProfileManager::profileSettingsAppName());
     settings.setValue("countryNotes/" + m_isoCode, m_notesEdit->toPlainText());
 }
