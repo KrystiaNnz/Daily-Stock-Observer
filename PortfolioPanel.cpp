@@ -5,6 +5,7 @@
 #include "PeersPanel.h"
 #include "HistoricalPriceChartWidget.h"
 #include "HistoricalPriceAnalysisDialog.h"
+#include "TickerSearchEdit.h"
 
 #include <QTableWidget>
 #include <QTableWidgetItem>
@@ -21,6 +22,7 @@
 #include <QTabWidget>
 #include <QDate>
 #include <QDateEdit>
+#include <QLineEdit>
 
 // ── Pomocnicze: item tylko do odczytu ─────────────────
 static QTableWidgetItem* roItem(const QString& text)
@@ -43,7 +45,7 @@ static QTableWidgetItem* roItemNum(double val, int decimals = 2)
 // ══════════════════════════════════════════════════════
 
 PortfolioPanel::PortfolioPanel(QWidget* parent)
-    : QWidget(parent), m_fetcher(this), m_historyFetcher(this)
+    : QWidget(parent), m_fetcher(this), m_historyFetcher(this), m_alphaFetcher(this)
 {
     setupUi();
 
@@ -55,6 +57,10 @@ PortfolioPanel::PortfolioPanel(QWidget* parent)
             this, &PortfolioPanel::onHistoryFetchFinished);
     connect(&m_historyFetcher, &HistoricalPriceFetcher::fetchError,
             this, &PortfolioPanel::onHistoryFetchError);
+    connect(&m_alphaFetcher, &AlphaEngineFetcher::factorLinksFinished,
+            this, &PortfolioPanel::onAlphaFactorLinksFinished);
+    connect(&m_alphaFetcher, &AlphaEngineFetcher::factorLinksError,
+            this, &PortfolioPanel::onAlphaFactorLinksError);
 }
 
 void PortfolioPanel::setupUi()
@@ -143,6 +149,7 @@ void PortfolioPanel::setupUi()
     m_bottomTabs->addTab(m_analysisPanel, "Analiza spółki");
     m_bottomTabs->addTab(m_peersPanel,    "Mapa Rynku");
     m_bottomTabs->addTab(createReportsTab(), "Raporty");
+    m_bottomTabs->addTab(createAlphaTab(), "Alpha");
 
     // ── Splitter: tabela (góra) + zakładki (dół) ─────────
     m_splitter = new QSplitter(Qt::Vertical, this);
@@ -187,6 +194,9 @@ QWidget* PortfolioPanel::createReportsTab()
     controls->addWidget(new QLabel("Ticker:", page));
     m_historyTickerCombo = new QComboBox(page);
     m_historyTickerCombo->setEditable(true);
+    m_historyTickerCombo->setLineEdit(new TickerSearchEdit(m_historyTickerCombo));
+    m_historyTickerCombo->setInsertPolicy(QComboBox::NoInsert);
+    m_historyTickerCombo->lineEdit()->setPlaceholderText("Wpisz nazwę lub ticker...");
     m_historyTickerCombo->setMinimumWidth(140);
     controls->addWidget(m_historyTickerCombo);
 
@@ -255,6 +265,56 @@ QWidget* PortfolioPanel::createReportsTab()
     return page;
 }
 
+QWidget* PortfolioPanel::createAlphaTab()
+{
+    auto* page = new QWidget(this);
+    auto* root = new QVBoxLayout(page);
+    root->setContentsMargins(12, 12, 12, 12);
+    root->setSpacing(10);
+
+    auto* controls = new QHBoxLayout();
+    controls->setSpacing(8);
+
+    controls->addWidget(new QLabel("Ticker:", page));
+    m_alphaTickerCombo = new QComboBox(page);
+    m_alphaTickerCombo->setEditable(true);
+    m_alphaTickerCombo->setLineEdit(new TickerSearchEdit(m_alphaTickerCombo));
+    m_alphaTickerCombo->setInsertPolicy(QComboBox::NoInsert);
+    m_alphaTickerCombo->lineEdit()->setPlaceholderText("Wpisz nazwę lub ticker...");
+    m_alphaTickerCombo->setMinimumWidth(140);
+    controls->addWidget(m_alphaTickerCombo);
+
+    m_alphaComputeBtn = new QPushButton("Policz czynniki", page);
+    controls->addWidget(m_alphaComputeBtn);
+    controls->addStretch();
+    root->addLayout(controls);
+
+    m_alphaStatusLabel = new QLabel(
+        "Alpha MVP: korelacje i kowariancje tickera z lokalnymi czynnikami w bazie.",
+        page);
+    m_alphaStatusLabel->setStyleSheet("color: #666; font-size: 12px;");
+    root->addWidget(m_alphaStatusLabel);
+
+    m_alphaTable = new QTableWidget(0, 7, page);
+    m_alphaTable->setHorizontalHeaderLabels({
+        "Czynnik", "Typ", "Korelacja", "Kowariancja", "Obserwacje", "Stabilność", "Okno"
+    });
+    m_alphaTable->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
+    m_alphaTable->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
+    m_alphaTable->setSelectionBehavior(QAbstractItemView::SelectRows);
+    m_alphaTable->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_alphaTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    m_alphaTable->setSortingEnabled(true);
+    m_alphaTable->setAlternatingRowColors(true);
+    m_alphaTable->verticalHeader()->setVisible(false);
+    root->addWidget(m_alphaTable, 1);
+
+    connect(m_alphaComputeBtn, &QPushButton::clicked,
+            this, &PortfolioPanel::onComputeAlphaFactors);
+
+    return page;
+}
+
 void PortfolioPanel::refreshTable()
 {
     m_table->setSortingEnabled(false);
@@ -285,6 +345,7 @@ void PortfolioPanel::refreshTable()
     m_table->setSortingEnabled(true);
     rebuildFilterCombos();
     rebuildHistoryTickerCombo();
+    rebuildAlphaTickerCombo();
     applyFilter();
     updateSummary();
 
@@ -586,6 +647,118 @@ void PortfolioPanel::rebuildHistoryTickerCombo()
             m_historyTickerCombo->setEditText(current);
     }
     m_historyTickerCombo->blockSignals(false);
+}
+
+void PortfolioPanel::rebuildAlphaTickerCombo()
+{
+    if (!m_alphaTickerCombo) return;
+
+    QString current = m_alphaTickerCombo->currentText().trimmed();
+    QSet<QString> tickers;
+    for (int r = 0; r < m_table->rowCount(); ++r) {
+        QString ticker = m_table->item(r, Ticker)->text().trimmed().toUpper();
+        if (!ticker.isEmpty())
+            tickers.insert(ticker);
+    }
+
+    m_alphaTickerCombo->blockSignals(true);
+    m_alphaTickerCombo->clear();
+    QStringList sorted = QStringList(tickers.begin(), tickers.end());
+    sorted.sort();
+    m_alphaTickerCombo->addItems(sorted);
+    if (!current.isEmpty()) {
+        int idx = m_alphaTickerCombo->findText(current, Qt::MatchFixedString);
+        if (idx >= 0)
+            m_alphaTickerCombo->setCurrentIndex(idx);
+        else
+            m_alphaTickerCombo->setEditText(current);
+    }
+    m_alphaTickerCombo->blockSignals(false);
+}
+
+void PortfolioPanel::setAlphaBusy(bool active)
+{
+    m_alphaComputeBtn->setEnabled(!active);
+    m_alphaComputeBtn->setText(active ? "Liczenie..." : "Policz czynniki");
+    if (active) {
+        m_alphaStatusLabel->setText("Liczenie kowariancji i korelacji na lokalnej bazie...");
+        m_alphaStatusLabel->setStyleSheet("color: #3b82f6; font-size: 12px;");
+    }
+}
+
+void PortfolioPanel::updateAlphaTable(const QList<AssetFactorCovariance>& rows)
+{
+    m_alphaTable->setSortingEnabled(false);
+    m_alphaTable->setRowCount(0);
+
+    for (const AssetFactorCovariance& item : rows) {
+        const int row = m_alphaTable->rowCount();
+        m_alphaTable->insertRow(row);
+        m_alphaTable->setItem(row, 0, roItem(item.factorCode));
+        m_alphaTable->setItem(row, 1, roItem(item.factorType));
+        m_alphaTable->setItem(row, 2, roItemNum(item.correlation, 4));
+        m_alphaTable->setItem(row, 3, roItemNum(item.covariance, 8));
+        m_alphaTable->setItem(row, 4, roItemNum(item.observations, 0));
+        m_alphaTable->setItem(row, 5, roItemNum(item.stabilityScore, 2));
+        m_alphaTable->setItem(row, 6, roItem(QString::number(item.windowDays) + " dni"));
+
+        QColor corrColor = (item.correlation >= 0.0) ? QColor("#15803d") : QColor("#b91c1c");
+        m_alphaTable->item(row, 2)->setForeground(corrColor);
+    }
+
+    m_alphaTable->setSortingEnabled(true);
+}
+
+void PortfolioPanel::onComputeAlphaFactors()
+{
+    if (m_alphaFetcher.isRunning())
+        return;
+
+    const QString ticker = m_alphaTickerCombo->currentText().trimmed().toUpper();
+    if (ticker.isEmpty()) {
+        QMessageBox::warning(this, "Brak tickera", "Podaj ticker do analizy Alpha.");
+        return;
+    }
+
+    setAlphaBusy(true);
+    updateAlphaTable({});
+    m_alphaFetcher.computeFactorLinks(ticker, 25, 756, 0);
+}
+
+void PortfolioPanel::onAlphaFactorLinksFinished(const QString& ticker,
+                                                int candidateRows,
+                                                int savedRows,
+                                                const QList<AssetFactorCovariance>& rows)
+{
+    setAlphaBusy(false);
+    updateAlphaTable(rows);
+
+    m_alphaStatusLabel->setText(
+        QString("Alpha MVP %1: pokazano %2 czynnikow, zapisano %3, kandydaci %4.")
+            .arg(ticker)
+            .arg(rows.size())
+            .arg(savedRows)
+            .arg(candidateRows));
+    m_alphaStatusLabel->setStyleSheet("color: #666; font-size: 12px;");
+}
+
+void PortfolioPanel::onAlphaFactorLinksError(const QString& message)
+{
+    setAlphaBusy(false);
+    updateAlphaTable({});
+
+    QString guidance = message;
+    if (message.contains("Za malo danych cenowych", Qt::CaseInsensitive)) {
+        const QString ticker = m_alphaTickerCombo
+            ? m_alphaTickerCombo->currentText().trimmed().toUpper()
+            : QString();
+        if (m_historyTickerCombo && !ticker.isEmpty())
+            m_historyTickerCombo->setEditText(ticker);
+        guidance += " Najpierw wybierz poprawny ticker z listy podpowiedzi i pobierz jego historie cen w zakladce Raporty.";
+    }
+
+    m_alphaStatusLabel->setText("Blad Alpha: " + guidance);
+    m_alphaStatusLabel->setStyleSheet("color: #e53e3e; font-size: 12px;");
 }
 
 void PortfolioPanel::onLoadHistoricalPrices()

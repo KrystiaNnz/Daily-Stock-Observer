@@ -88,6 +88,52 @@ struct MarketPriceCacheMeta {
 };
 
 // Profil doświadczenia użytkownika
+struct MacroObservation {
+    int     id = 0;
+    QString countryIso;
+    QString indicatorCode;
+    QString date;
+    double  value = 0.0;
+    QString unit;
+    QString frequency;
+    QString source;
+    QString confidence;
+    QString updatedAt;
+};
+
+struct IndicatorDefinition {
+    int     id = 0;
+    QString indicatorCode;
+    QString name;
+    QString category;
+    QString unit;
+    QString frequency;
+    QString directionHint;
+    QString defaultTransform;
+    QString allowedTransforms;
+    QString preferredSource;
+    QString fallbackSource;
+    QString description;
+    int     priority = 100;
+    bool    active = true;
+    QString updatedAt;
+};
+
+struct AssetFactorCovariance {
+    int     id = 0;
+    QString ticker;
+    QString factorCode;
+    QString factorType;
+    int     windowDays = 0;
+    int     lagPeriods = 0;
+    double  covariance = 0.0;
+    double  correlation = 0.0;
+    double  pValue = 0.0;
+    int     observations = 0;
+    double  stabilityScore = 0.0;
+    QString computedAt;
+};
+
 struct ExperienceProfile {
     int totalXp = 0;
     int level = 1;
@@ -173,9 +219,22 @@ public:
                                                            const QString& status = "ok",
                                                            const QString& errorMessage = QString());
 
+    // Ustandaryzowane dane i przyszly Alpha / Edge Engine
+    bool                       upsertMacroObservations(const QList<MacroObservation>& observations);
+    QList<MacroObservation>    getMacroObservations(const QString& countryIso,
+                                                    const QString& indicatorCode,
+                                                    const QString& startDate,
+                                                    const QString& endDate,
+                                                    const QString& source = QString());
+    bool                       upsertAssetFactorCovariances(const QList<AssetFactorCovariance>& rows);
+    QList<AssetFactorCovariance> getAssetFactorCovariances(const QString& ticker,
+                                                           int limit = 50);
+
 private:
     DatabaseManager() = default;
     bool awardExperienceForStep(int stepId);
     int  calculateStreakDays();
+    void seedIndicatorDefinitions();
+    void seedCompanyFactorDefinitions();
     QSqlDatabase m_db;
 };

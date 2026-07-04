@@ -35,6 +35,8 @@ pip install yfinance
 | `analyze.py` | `python analyze.py <ticker>` | Metryki spółki + rekomendacje |
 | `edgar.py` | `python edgar.py <ticker>` | Filingi SEC EDGAR |
 | `peers.py` | `python peers.py <ticker>` | Rówieśnicy branżowi (używa `peers_db.json`) |
+| `edge_engine.py` | `python edge_engine.py compute-factor-links <db_path> <ticker>` | MVP Alpha / Edge Engine: kowariancja i korelacja tickera z lokalnymi czynnikami w SQLite |
+| `macro_data.py` | `python macro_data.py fetch-pl-nbp <db_path> <start> <end>` | Polski konektor makro MVP: pobiera z NBP API kursy USD/EUR/CHF/GBP oraz cene zlota do `macro_observations` |
 | `financial_calculator.py` | `python financial_calculator.py investment <zysk> <naklad> <inflacja_pct>` lub `stock <cena_zakupu> <cena_sprzedazy> <dywidenda> <inflacja_pct>` lub `exercise <department>` | Stopa zwrotu nominalna/realna oraz generator zadan |
 | `analysis.py` | placeholder (Faza 8) | |
 | `crypto.py` | placeholder (Faza 7) | |
@@ -58,6 +60,12 @@ SQLite jest rozdzielone per profil danych: `%APPDATA%/Kryst/DailyStockObserver/p
 Bazy danych uzytkownika sa osobiste i lokalne. Nie commitowac do GitHuba plikow SQLite ani przyszlych cache'y z historycznymi cenami instrumentow (`market_price_bars`, `market_price_cache_meta`, dane typu AAPL/S&P500 itd.). Repo ma zawierac kod, schematy, migracje i male statyczne zasoby referencyjne, ale nie zbudowany lokalnie cache danych rynkowych. Historyczne ceny maja byc odtwarzalne przez fetcher i przechowywane per profil poza repo.
 
 Raporty portfela rozwijamy w kolejnosci: najpierw tabela historycznych cen, pozniej wykres. Tabela zostaje stalym narzedziem analizy, kontroli danych i eksportu do Excela/Power BI; wykres jest dodatkowa warstwa wizualna, nie zamiennik tabeli. MVP zapisuje dzienne OHLCV w `market_price_bars`, metadane cache w `market_price_cache_meta`, a pole `interval` zostaje przygotowane pod pozniejsze dane godzinowe/minutowe. `HistoricalPriceChartWidget` rysuje wykres nad tabela i ma tryby: linia close, slupki close oraz swiece OHLC. Widget uzywa palety aplikacji, zeby utrzymac kontrast przy jasnym/ciemnym tle. `HistoricalPriceAnalysisDialog` jest duzym widokiem analitycznym otwieranym z przycisku `Rozszerz`; pokazuje ten sam dataset z filtrem dat, statystykami i kopiowaniem/eksportem CSV.
+
+Alpha / Edge Engine MVP dodaje tabele `data_sources`, `indicator_definitions`, `macro_observations`, `asset_factor_covariances`, `alpha_scores` i `alpha_score_components`. Dane z API i stron maja docelowo trafiac najpierw do standardowych obserwacji (`macro_observations`), a dopiero potem do algorytmow. `edge_engine.py` czyta aktywna baze profilu, liczy factor links przez kowariancje/korelacje i zapisuje wyniki w `asset_factor_covariances`. Korelacja/kowariancja jest radarem priorytetyzacji sygnalow, nie rekomendacja inwestycyjna.
+
+Slownik czynnikow ekonomicznych jest seedowany z `python/indicator_definitions.json` do `indicator_definitions`. Definicja czynnika ma m.in. `indicator_code`, kategorie, jednostke, czestotliwosc, `direction_hint`, `default_transform`, `allowed_transforms`, preferowane/fallbackowe zrodlo, priorytet i aktywnosc. Mapowanie konkretnego kraju i zrodla idzie do `indicator_source_mappings`; nie hardcodowac identyfikatorow serii API w algorytmie.
+
+Pierwszy konektor country/macro to `python/macro_data.py fetch-pl-nbp <db_path> <start> <end>`. Importuje dane NBP dla Polski do `macro_observations`, tworzy zrodlo `NBP_API` w `data_sources` i aktywne mapowania w `indicator_source_mappings`. Obecny zakres MVP: `fx_usd_local`, `fx_eur_local`, `fx_chf_local`, `fx_gbp_local` oraz `gold_price`.
 
 ## Architektura
 
@@ -124,6 +132,8 @@ Cztery fetchery (`PortfolioFetcher`, `CompanyAnalyzer`, `PeersFetcher`, `EdgarFe
 `QSplitter` pionowy: tabela aktywów (góra) + `QTabWidget` (dół) z:
 - `CompanyAnalysisPanel` — wywołuje `CompanyAnalyzer::analyze(ticker)` po kliknięciu wiersza
 - `PeersPanel` — wywołuje `PeersFetcher::fetchPeers(ticker)` + rysuje `WorldHeatmapWidget`
+- `Raporty` — historyczne ceny OHLCV, wykres i rozszerzony widok analizy
+- `Alpha` — `AlphaEngineFetcher` + `edge_engine.py`, lokalne factor links przez kowariancje/korelacje
 
 `PortfolioAsset` ma `assetType` rozdzielony od `category`: typ instrumentu to m.in. `Akcja`, `ETF`, `Obligacja rządowa`, `Obligacja korporacyjna`, `Kryptowaluta`, `Kontrakt na surowce`, `Inne`, a `category` zostaje sektorem/tematem. `portfolio_assets.asset_type` jest migrowane przez `ALTER TABLE ... ADD COLUMN` z domyślnym `Akcja`. `PortfolioPanel` pokazuje kolumnę `Typ` i ma osobne filtry po typie oraz kategorii. `AddAssetDialog` pokazuje podpowiedzi tickerów per typ instrumentu: ETF-y i kontrakty surowcowe używają tickerów giełdowych/Yahoo Finance, krypto zwykle `BTC-USD`, a obligacje można wpisać po tickerze, ISIN albo własnym identyfikatorze. Pojedyncze obligacje są pomijane przy automatycznym `PortfolioFetcher::fetchPrices()`.
 

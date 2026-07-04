@@ -187,7 +187,7 @@ void TickerSearchEdit::onTextEdited(const QString& text)
     m_ticker.clear();
     m_name.clear();
 
-    if (text.trimmed().length() < 2) {
+    if (text.trimmed().isEmpty()) {
         m_debounce->stop();
         m_model->clear();
         return;
@@ -228,7 +228,7 @@ void TickerSearchEdit::onSearchFinished(int /*exitCode*/, QProcess::ExitStatus /
 
     // Jeśli użytkownik wpisał kolejną frazę podczas wyszukiwania — uruchom ponownie
     QString current = text().trimmed();
-    if (current.length() >= 2)
+    if (!current.isEmpty())
         m_completer->complete();
 }
 

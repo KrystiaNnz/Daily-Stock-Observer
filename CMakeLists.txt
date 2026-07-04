@@ -27,6 +27,8 @@ qt_add_executable(DailyStockObserver
     AddGoalDialog.cpp
     PortfolioFetcher.h
     PortfolioFetcher.cpp
+    AlphaEngineFetcher.h
+    AlphaEngineFetcher.cpp
     HistoricalPriceFetcher.h
     HistoricalPriceFetcher.cpp
     HistoricalPriceChartWidget.h

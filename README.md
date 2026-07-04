@@ -18,6 +18,13 @@ Implemented:
 - Goal tracking with steps, progress, long-term goals, and editable goal cards
 - Customizable color and display settings stored locally, including automatic text contrast for light/dark backgrounds
 - Portfolio panel with asset tracking and live quote fetching through Python/yfinance
+- Ticker autocomplete for portfolio ticker fields: adding assets, historical reports, and Alpha analysis
+- Local GPW ticker fallback in `python/search.py` for common Polish stocks when searching by company name
+- Instrument Master schema for a refreshable global securities database, including exchanges, instruments, listings, aliases, locations, source mappings, and refresh jobs
+- Company / Micro Factors dictionary seeded from `python/company_factor_definitions.json`
+- Alpha / Edge Engine MVP in the portfolio panel: computes local factor links through covariance/correlation and stores results in SQLite
+- Indicator dictionary architecture for the edge engine, seeded from `python/indicator_definitions.json`
+- First Polish macro-data connector: `python/macro_data.py fetch-pl-nbp` imports NBP API FX and gold data into `macro_observations`
 - Modular Qt widgets for calendar, planner, goals, portfolio, and map views
 - Custom Qt world map panel with tile loading, pan/zoom, country search, country borders, administrative regions, and local data source metadata
 - Financial calculator panel backed by a Python helper script for nominal and real investment return calculations, with an initial bridge for loading purchase-price data from portfolio assets
@@ -29,6 +36,7 @@ Planned:
 - Analytics and reporting through Python/pandas
 - Forecasting and deeper portfolio analysis
 - More complete local data connectors, starting with official statistical APIs
+- Standardized macro observations feeding the Alpha / Edge Engine
 
 ## Tech Stack
 
@@ -55,6 +63,7 @@ Key components:
 - `PlannerView` - time-slot planner view
 - `GoalsPanel` and `GoalsListView` - goal tracking UI
 - `PortfolioPanel` and `PortfolioFetcher` - portfolio table and live quote fetching
+- `AlphaEngineFetcher` - asynchronous bridge to `python/edge_engine.py`
 - `FinancialCalculatorPanel` - finance calculator UI backed by `python/financial_calculator.py`
 - `MapPanel` and `TileManager` - custom map rendering and map tile loading
 - `CountryData`, `CountryBorders`, `CountrySubdivisions`, and `LocalDataSources` - local map metadata loaders
@@ -101,6 +110,10 @@ Examples:
 
 - `portfolio.py` fetches live market quotes
 - `search.py` searches tickers
+- `edge_engine.py` computes ticker-factor covariance/correlation links from the local SQLite database
+- `indicator_definitions.json` contains the V1 economic-factor dictionary used to seed `indicator_definitions`
+- `company_factor_definitions.json` contains the V1 company/micro-factor dictionary for Instrument Master, map layers, micro charts, and future Edge Engine inputs
+- `macro_data.py fetch-pl-nbp <db_path> <start> <end>` imports Polish NBP API data into the standardized macro tables
 - `financial_calculator.py` calculates investment return, stock return with dividends, and real return after inflation
 - `financial_calculator.py exercise <department>` generates finance practice tasks with XP rewards scaled by difficulty; the UI shows `MATEMATYKA FINANSOWA`, `INSTRUMENTY DLUZNE`, `TECHNIKI NOTOWAN GIELDOWYCH`, `INSTRUMENTY POCHODNE`, `ANALIZA PORTFELOWA`, and `ANALIZA WSKAZNIKOWA I RACHUNKOWOSC` mixes by default and can expand into concrete task types
 - The debt-instruments mix starts with loan installments, zero-coupon bonds, coupon bond pricing, YTM, Macaulay duration, modified duration, and convexity

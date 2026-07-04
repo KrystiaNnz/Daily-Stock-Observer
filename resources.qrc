@@ -4,6 +4,9 @@
         <file>python/borders_data.json</file>
         <file>python/subdivisions_data.json</file>
         <file>python/local_data_sources.json</file>
+        <file>python/indicator_definitions.json</file>
+        <file>python/company_factor_definitions.json</file>
+        <file>python/macro_data.py</file>
         <file>python/countries_data.json</file>
         <file>python/regions_data.json</file>
     </qresource>

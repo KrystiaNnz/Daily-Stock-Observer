@@ -5,6 +5,7 @@
 #include <QPair>
 #include "PortfolioFetcher.h"
 #include "HistoricalPriceFetcher.h"
+#include "AlphaEngineFetcher.h"
 
 class QTableWidget;
 class QLabel;
@@ -38,6 +39,12 @@ private slots:
     void onLoadHistoricalPrices();
     void onHistoryChartTypeChanged(int index);
     void onOpenHistoryAnalysis();
+    void onComputeAlphaFactors();
+    void onAlphaFactorLinksFinished(const QString& ticker,
+                                    int candidateRows,
+                                    int savedRows,
+                                    const QList<AssetFactorCovariance>& rows);
+    void onAlphaFactorLinksError(const QString& message);
     void onHistoryFetchFinished(const QString& ticker,
                                 const QString& interval,
                                 const QString& source,
@@ -48,12 +55,16 @@ private slots:
 private:
     void setupUi();
     QWidget* createReportsTab();
+    QWidget* createAlphaTab();
     void applyLivePrices(const QMap<QString, PortfolioQuote>& quotes);
     void updateSummary();
     void setRefreshing(bool active);
     void applyFilter();
     void rebuildFilterCombos();
     void rebuildHistoryTickerCombo();
+    void rebuildAlphaTickerCombo();
+    void setAlphaBusy(bool active);
+    void updateAlphaTable(const QList<AssetFactorCovariance>& rows);
     void queueMissingHistoryRanges();
     void startNextHistoryFetch();
     void loadHistoricalTable();
@@ -85,6 +96,10 @@ private:
     QLabel*               m_historyStatusLabel = nullptr;
     HistoricalPriceChartWidget* m_historyChart = nullptr;
     QTableWidget*         m_historyTable = nullptr;
+    QComboBox*            m_alphaTickerCombo = nullptr;
+    QPushButton*          m_alphaComputeBtn = nullptr;
+    QLabel*               m_alphaStatusLabel = nullptr;
+    QTableWidget*         m_alphaTable = nullptr;
     QList<MarketPriceBar> m_historyRows;
     QList<QPair<QString, QString>> m_pendingHistoryRanges;
     QString               m_historyTicker;
@@ -94,4 +109,5 @@ private:
 
     PortfolioFetcher m_fetcher;
     HistoricalPriceFetcher m_historyFetcher;
+    AlphaEngineFetcher m_alphaFetcher;
 };

@@ -9,6 +9,10 @@
 #include <QFileInfo>
 #include <QDebug>
 #include <QDateTime>
+#include <QCoreApplication>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QSet>
 #include <QtMath>
 
@@ -214,6 +218,361 @@ bool DatabaseManager::init()
            "ON market_price_bars(ticker, interval, source, timestamp)");
     q.exec("CREATE INDEX IF NOT EXISTS idx_market_price_bars_date "
            "ON market_price_bars(trading_date)");
+
+    if (!q.exec(R"(
+        CREATE TABLE IF NOT EXISTS data_sources (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_code     TEXT    NOT NULL UNIQUE,
+            name            TEXT    NOT NULL,
+            source_type     TEXT,
+            country_iso     TEXT,
+            api_url         TEXT,
+            website_url     TEXT,
+            confidence      TEXT,
+            notes           TEXT,
+            updated_at      TEXT    DEFAULT CURRENT_TIMESTAMP
+        )
+    )")) {
+        qDebug() << "Blad tabeli data_sources:" << q.lastError().text();
+        return false;
+    }
+
+    if (!q.exec(R"(
+        CREATE TABLE IF NOT EXISTS exchanges (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            exchange_code       TEXT    NOT NULL UNIQUE,
+            name                TEXT    NOT NULL,
+            country_iso         TEXT,
+            mic_code            TEXT,
+            yahoo_suffix        TEXT,
+            timezone            TEXT,
+            default_currency    TEXT,
+            website_url         TEXT,
+            data_source         TEXT,
+            active              INTEGER DEFAULT 1,
+            updated_at          TEXT    DEFAULT CURRENT_TIMESTAMP
+        )
+    )")) {
+        qDebug() << "Blad tabeli exchanges:" << q.lastError().text();
+        return false;
+    }
+
+    if (!q.exec(R"(
+        CREATE TABLE IF NOT EXISTS instruments (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            canonical_name      TEXT    NOT NULL,
+            legal_name          TEXT,
+            instrument_type     TEXT    DEFAULT 'equity',
+            country_iso         TEXT,
+            sector              TEXT,
+            industry            TEXT,
+            website_url         TEXT,
+            active              INTEGER DEFAULT 1,
+            created_at          TEXT    DEFAULT CURRENT_TIMESTAMP,
+            updated_at          TEXT    DEFAULT CURRENT_TIMESTAMP
+        )
+    )")) {
+        qDebug() << "Blad tabeli instruments:" << q.lastError().text();
+        return false;
+    }
+
+    if (!q.exec(R"(
+        CREATE TABLE IF NOT EXISTS instrument_listings (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            instrument_id       INTEGER NOT NULL,
+            exchange_id         INTEGER,
+            ticker              TEXT    NOT NULL,
+            provider_symbol     TEXT,
+            currency            TEXT,
+            isin                TEXT,
+            figi                TEXT,
+            lei                 TEXT,
+            listing_status      TEXT    DEFAULT 'active',
+            first_seen          TEXT,
+            last_seen           TEXT,
+            updated_at          TEXT    DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (instrument_id) REFERENCES instruments(id) ON DELETE CASCADE,
+            FOREIGN KEY (exchange_id) REFERENCES exchanges(id) ON DELETE SET NULL,
+            UNIQUE(ticker, exchange_id, provider_symbol)
+        )
+    )")) {
+        qDebug() << "Blad tabeli instrument_listings:" << q.lastError().text();
+        return false;
+    }
+
+    if (!q.exec(R"(
+        CREATE TABLE IF NOT EXISTS instrument_aliases (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            instrument_id       INTEGER,
+            listing_id          INTEGER,
+            alias               TEXT    NOT NULL,
+            alias_norm          TEXT    NOT NULL,
+            alias_type          TEXT,
+            priority            INTEGER DEFAULT 100,
+            source              TEXT,
+            updated_at          TEXT    DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (instrument_id) REFERENCES instruments(id) ON DELETE CASCADE,
+            FOREIGN KEY (listing_id) REFERENCES instrument_listings(id) ON DELETE CASCADE,
+            UNIQUE(alias_norm, listing_id)
+        )
+    )")) {
+        qDebug() << "Blad tabeli instrument_aliases:" << q.lastError().text();
+        return false;
+    }
+
+    if (!q.exec(R"(
+        CREATE TABLE IF NOT EXISTS instrument_locations (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            instrument_id       INTEGER NOT NULL,
+            country_iso         TEXT,
+            region_code         TEXT,
+            city                TEXT,
+            address             TEXT,
+            postal_code         TEXT,
+            latitude            REAL,
+            longitude           REAL,
+            location_type       TEXT    DEFAULT 'headquarters',
+            source              TEXT,
+            confidence          TEXT,
+            updated_at          TEXT    DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (instrument_id) REFERENCES instruments(id) ON DELETE CASCADE
+        )
+    )")) {
+        qDebug() << "Blad tabeli instrument_locations:" << q.lastError().text();
+        return false;
+    }
+
+    if (!q.exec(R"(
+        CREATE TABLE IF NOT EXISTS instrument_source_mappings (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            listing_id          INTEGER,
+            source_code         TEXT    NOT NULL,
+            source_symbol       TEXT,
+            source_url          TEXT,
+            refresh_frequency   TEXT,
+            status              TEXT    DEFAULT 'planned',
+            last_checked        TEXT,
+            updated_at          TEXT    DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (listing_id) REFERENCES instrument_listings(id) ON DELETE CASCADE,
+            UNIQUE(listing_id, source_code, source_symbol)
+        )
+    )")) {
+        qDebug() << "Blad tabeli instrument_source_mappings:" << q.lastError().text();
+        return false;
+    }
+
+    if (!q.exec(R"(
+        CREATE TABLE IF NOT EXISTS instrument_refresh_jobs (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_code         TEXT    NOT NULL,
+            exchange_id         INTEGER,
+            started_at          TEXT    DEFAULT CURRENT_TIMESTAMP,
+            finished_at         TEXT,
+            status              TEXT    DEFAULT 'running',
+            rows_fetched        INTEGER DEFAULT 0,
+            rows_inserted       INTEGER DEFAULT 0,
+            rows_updated        INTEGER DEFAULT 0,
+            error_message       TEXT,
+            FOREIGN KEY (exchange_id) REFERENCES exchanges(id) ON DELETE SET NULL
+        )
+    )")) {
+        qDebug() << "Blad tabeli instrument_refresh_jobs:" << q.lastError().text();
+        return false;
+    }
+
+    if (!q.exec(R"(
+        CREATE TABLE IF NOT EXISTS indicator_definitions (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            indicator_code  TEXT    NOT NULL UNIQUE,
+            name            TEXT    NOT NULL,
+            category        TEXT,
+            unit            TEXT,
+            frequency       TEXT,
+            direction_hint  TEXT,
+            default_transform TEXT,
+            allowed_transforms TEXT,
+            preferred_source TEXT,
+            fallback_source TEXT,
+            priority        INTEGER DEFAULT 100,
+            active          INTEGER DEFAULT 1,
+            description     TEXT,
+            updated_at      TEXT    DEFAULT CURRENT_TIMESTAMP
+        )
+    )")) {
+        qDebug() << "Blad tabeli indicator_definitions:" << q.lastError().text();
+        return false;
+    }
+    q.exec("ALTER TABLE indicator_definitions ADD COLUMN default_transform TEXT");
+    q.exec("ALTER TABLE indicator_definitions ADD COLUMN allowed_transforms TEXT");
+    q.exec("ALTER TABLE indicator_definitions ADD COLUMN preferred_source TEXT");
+    q.exec("ALTER TABLE indicator_definitions ADD COLUMN fallback_source TEXT");
+    q.exec("ALTER TABLE indicator_definitions ADD COLUMN priority INTEGER DEFAULT 100");
+    q.exec("ALTER TABLE indicator_definitions ADD COLUMN active INTEGER DEFAULT 1");
+
+    if (!q.exec(R"(
+        CREATE TABLE IF NOT EXISTS company_factor_definitions (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            factor_code         TEXT    NOT NULL UNIQUE,
+            name                TEXT    NOT NULL,
+            category            TEXT,
+            value_type          TEXT    DEFAULT 'numeric',
+            unit                TEXT,
+            frequency           TEXT,
+            direction_hint      TEXT,
+            default_transform   TEXT,
+            allowed_transforms  TEXT,
+            preferred_source    TEXT,
+            fallback_source     TEXT,
+            priority            INTEGER DEFAULT 100,
+            active              INTEGER DEFAULT 1,
+            map_layer           INTEGER DEFAULT 0,
+            edge_enabled        INTEGER DEFAULT 1,
+            description         TEXT,
+            updated_at          TEXT    DEFAULT CURRENT_TIMESTAMP
+        )
+    )")) {
+        qDebug() << "Blad tabeli company_factor_definitions:" << q.lastError().text();
+        return false;
+    }
+
+    if (!q.exec(R"(
+        CREATE TABLE IF NOT EXISTS company_factor_observations (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            instrument_id       INTEGER NOT NULL,
+            listing_id          INTEGER,
+            factor_code         TEXT    NOT NULL,
+            date                TEXT    NOT NULL,
+            numeric_value       REAL,
+            text_value          TEXT,
+            unit                TEXT,
+            source              TEXT    NOT NULL,
+            confidence          TEXT,
+            updated_at          TEXT    DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (instrument_id) REFERENCES instruments(id) ON DELETE CASCADE,
+            FOREIGN KEY (listing_id) REFERENCES instrument_listings(id) ON DELETE CASCADE,
+            UNIQUE(instrument_id, listing_id, factor_code, date, source)
+        )
+    )")) {
+        qDebug() << "Blad tabeli company_factor_observations:" << q.lastError().text();
+        return false;
+    }
+
+    if (!q.exec(R"(
+        CREATE TABLE IF NOT EXISTS indicator_source_mappings (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            country_iso         TEXT    NOT NULL,
+            indicator_code      TEXT    NOT NULL,
+            source_code         TEXT    NOT NULL,
+            source_indicator_id TEXT,
+            source_frequency    TEXT,
+            source_unit         TEXT,
+            transform_hint      TEXT,
+            priority            INTEGER DEFAULT 100,
+            status              TEXT    DEFAULT 'planned',
+            notes               TEXT,
+            last_checked        TEXT,
+            updated_at          TEXT    DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(country_iso, indicator_code, source_code)
+        )
+    )")) {
+        qDebug() << "Blad tabeli indicator_source_mappings:" << q.lastError().text();
+        return false;
+    }
+
+    if (!q.exec(R"(
+        CREATE TABLE IF NOT EXISTS macro_observations (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            country_iso     TEXT    NOT NULL,
+            indicator_code  TEXT    NOT NULL,
+            date            TEXT    NOT NULL,
+            value           REAL    NOT NULL,
+            unit            TEXT,
+            frequency       TEXT,
+            source          TEXT    NOT NULL,
+            confidence      TEXT,
+            updated_at      TEXT    DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(country_iso, indicator_code, date, source)
+        )
+    )")) {
+        qDebug() << "Blad tabeli macro_observations:" << q.lastError().text();
+        return false;
+    }
+
+    if (!q.exec(R"(
+        CREATE TABLE IF NOT EXISTS asset_factor_covariances (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker              TEXT    NOT NULL,
+            factor_code         TEXT    NOT NULL,
+            factor_type         TEXT    NOT NULL,
+            window_days         INTEGER NOT NULL DEFAULT 0,
+            lag_periods         INTEGER NOT NULL DEFAULT 0,
+            covariance          REAL,
+            correlation         REAL,
+            p_value             REAL,
+            observations        INTEGER DEFAULT 0,
+            stability_score     REAL,
+            computed_at         TEXT    DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(ticker, factor_code, factor_type, window_days, lag_periods)
+        )
+    )")) {
+        qDebug() << "Blad tabeli asset_factor_covariances:" << q.lastError().text();
+        return false;
+    }
+
+    if (!q.exec(R"(
+        CREATE TABLE IF NOT EXISTS alpha_scores (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker          TEXT    NOT NULL,
+            score           REAL    NOT NULL,
+            model_version   TEXT    NOT NULL,
+            explanation     TEXT,
+            computed_at     TEXT    DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(ticker, model_version)
+        )
+    )")) {
+        qDebug() << "Blad tabeli alpha_scores:" << q.lastError().text();
+        return false;
+    }
+
+    if (!q.exec(R"(
+        CREATE TABLE IF NOT EXISTS alpha_score_components (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker          TEXT    NOT NULL,
+            model_version   TEXT    NOT NULL,
+            component       TEXT    NOT NULL,
+            value           REAL,
+            weight          REAL,
+            contribution    REAL,
+            explanation     TEXT,
+            computed_at     TEXT    DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(ticker, model_version, component)
+        )
+    )")) {
+        qDebug() << "Blad tabeli alpha_score_components:" << q.lastError().text();
+        return false;
+    }
+
+    q.exec("CREATE INDEX IF NOT EXISTS idx_macro_observations_lookup "
+           "ON macro_observations(country_iso, indicator_code, date)");
+    q.exec("CREATE INDEX IF NOT EXISTS idx_exchanges_country "
+           "ON exchanges(country_iso, active)");
+    q.exec("CREATE INDEX IF NOT EXISTS idx_instruments_country_sector "
+           "ON instruments(country_iso, sector, active)");
+    q.exec("CREATE INDEX IF NOT EXISTS idx_instrument_listings_lookup "
+           "ON instrument_listings(ticker, provider_symbol, listing_status)");
+    q.exec("CREATE INDEX IF NOT EXISTS idx_instrument_aliases_search "
+           "ON instrument_aliases(alias_norm, priority)");
+    q.exec("CREATE INDEX IF NOT EXISTS idx_instrument_locations_map "
+           "ON instrument_locations(country_iso, region_code, location_type)");
+    q.exec("CREATE INDEX IF NOT EXISTS idx_company_factor_observations_lookup "
+           "ON company_factor_observations(instrument_id, factor_code, date)");
+    q.exec("CREATE INDEX IF NOT EXISTS idx_asset_factor_covariances_ticker "
+           "ON asset_factor_covariances(ticker, correlation)");
+    q.exec("CREATE INDEX IF NOT EXISTS idx_indicator_source_mappings_lookup "
+           "ON indicator_source_mappings(country_iso, indicator_code, status)");
+
+    seedIndicatorDefinitions();
+    seedCompanyFactorDefinitions();
 
     return true;
 }
@@ -981,6 +1340,369 @@ bool DatabaseManager::refreshMarketPriceCacheMeta(const QString& ticker,
         return false;
     }
     return true;
+}
+
+bool DatabaseManager::upsertMacroObservations(const QList<MacroObservation>& observations)
+{
+    if (observations.isEmpty())
+        return true;
+
+    m_db.transaction();
+    QSqlQuery q;
+    q.prepare(R"(
+        INSERT INTO macro_observations (
+            country_iso, indicator_code, date, value, unit, frequency,
+            source, confidence, updated_at
+        ) VALUES (
+            :country_iso, :indicator_code, :date, :value, :unit, :frequency,
+            :source, :confidence, :updated_at
+        )
+        ON CONFLICT(country_iso, indicator_code, date, source) DO UPDATE SET
+            value = excluded.value,
+            unit = excluded.unit,
+            frequency = excluded.frequency,
+            confidence = excluded.confidence,
+            updated_at = excluded.updated_at
+    )");
+
+    const QString now = QDateTime::currentDateTime().toString("yyyy-MM-ddTHH:mm:ss");
+    for (const MacroObservation& obs : observations) {
+        q.bindValue(":country_iso", obs.countryIso.trimmed().toUpper());
+        q.bindValue(":indicator_code", obs.indicatorCode.trimmed());
+        q.bindValue(":date", obs.date);
+        q.bindValue(":value", obs.value);
+        q.bindValue(":unit", obs.unit);
+        q.bindValue(":frequency", obs.frequency);
+        q.bindValue(":source", obs.source.isEmpty() ? "unknown" : obs.source);
+        q.bindValue(":confidence", obs.confidence);
+        q.bindValue(":updated_at", now);
+        if (!q.exec()) {
+            qDebug() << "Blad upsert macro_observations:" << q.lastError().text();
+            m_db.rollback();
+            return false;
+        }
+    }
+
+    return m_db.commit();
+}
+
+QList<MacroObservation> DatabaseManager::getMacroObservations(const QString& countryIso,
+                                                              const QString& indicatorCode,
+                                                              const QString& startDate,
+                                                              const QString& endDate,
+                                                              const QString& source)
+{
+    QList<MacroObservation> rows;
+
+    QString sql = "SELECT id, country_iso, indicator_code, date, value, unit, frequency, "
+                  "source, confidence, updated_at FROM macro_observations "
+                  "WHERE country_iso = :country_iso AND indicator_code = :indicator_code "
+                  "AND date >= :start AND date <= :end";
+    if (!source.isEmpty())
+        sql += " AND source = :source";
+    sql += " ORDER BY date ASC";
+
+    QSqlQuery q;
+    q.prepare(sql);
+    q.bindValue(":country_iso", countryIso.trimmed().toUpper());
+    q.bindValue(":indicator_code", indicatorCode.trimmed());
+    q.bindValue(":start", startDate);
+    q.bindValue(":end", endDate);
+    if (!source.isEmpty())
+        q.bindValue(":source", source);
+
+    if (!q.exec()) {
+        qDebug() << "Blad getMacroObservations:" << q.lastError().text();
+        return rows;
+    }
+
+    while (q.next()) {
+        MacroObservation obs;
+        obs.id = q.value(0).toInt();
+        obs.countryIso = q.value(1).toString();
+        obs.indicatorCode = q.value(2).toString();
+        obs.date = q.value(3).toString();
+        obs.value = q.value(4).toDouble();
+        obs.unit = q.value(5).toString();
+        obs.frequency = q.value(6).toString();
+        obs.source = q.value(7).toString();
+        obs.confidence = q.value(8).toString();
+        obs.updatedAt = q.value(9).toString();
+        rows.append(obs);
+    }
+
+    return rows;
+}
+
+bool DatabaseManager::upsertAssetFactorCovariances(const QList<AssetFactorCovariance>& rows)
+{
+    if (rows.isEmpty())
+        return true;
+
+    m_db.transaction();
+    QSqlQuery q;
+    q.prepare(R"(
+        INSERT INTO asset_factor_covariances (
+            ticker, factor_code, factor_type, window_days, lag_periods,
+            covariance, correlation, p_value, observations, stability_score, computed_at
+        ) VALUES (
+            :ticker, :factor_code, :factor_type, :window_days, :lag_periods,
+            :covariance, :correlation, :p_value, :observations, :stability_score, :computed_at
+        )
+        ON CONFLICT(ticker, factor_code, factor_type, window_days, lag_periods) DO UPDATE SET
+            covariance = excluded.covariance,
+            correlation = excluded.correlation,
+            p_value = excluded.p_value,
+            observations = excluded.observations,
+            stability_score = excluded.stability_score,
+            computed_at = excluded.computed_at
+    )");
+
+    const QString now = QDateTime::currentDateTime().toString("yyyy-MM-ddTHH:mm:ss");
+    for (const AssetFactorCovariance& row : rows) {
+        q.bindValue(":ticker", row.ticker.trimmed().toUpper());
+        q.bindValue(":factor_code", row.factorCode.trimmed());
+        q.bindValue(":factor_type", row.factorType.isEmpty() ? "unknown" : row.factorType);
+        q.bindValue(":window_days", row.windowDays);
+        q.bindValue(":lag_periods", row.lagPeriods);
+        q.bindValue(":covariance", row.covariance);
+        q.bindValue(":correlation", row.correlation);
+        q.bindValue(":p_value", row.pValue);
+        q.bindValue(":observations", row.observations);
+        q.bindValue(":stability_score", row.stabilityScore);
+        q.bindValue(":computed_at", now);
+        if (!q.exec()) {
+            qDebug() << "Blad upsert asset_factor_covariances:" << q.lastError().text();
+            m_db.rollback();
+            return false;
+        }
+    }
+
+    return m_db.commit();
+}
+
+QList<AssetFactorCovariance> DatabaseManager::getAssetFactorCovariances(const QString& ticker,
+                                                                        int limit)
+{
+    QList<AssetFactorCovariance> rows;
+
+    QSqlQuery q;
+    q.prepare("SELECT id, ticker, factor_code, factor_type, window_days, lag_periods, "
+              "covariance, correlation, p_value, observations, stability_score, computed_at "
+              "FROM asset_factor_covariances WHERE ticker = :ticker "
+              "ORDER BY ABS(correlation) DESC LIMIT :limit");
+    q.bindValue(":ticker", ticker.trimmed().toUpper());
+    q.bindValue(":limit", qMax(1, limit));
+
+    if (!q.exec()) {
+        qDebug() << "Blad getAssetFactorCovariances:" << q.lastError().text();
+        return rows;
+    }
+
+    while (q.next()) {
+        AssetFactorCovariance row;
+        row.id = q.value(0).toInt();
+        row.ticker = q.value(1).toString();
+        row.factorCode = q.value(2).toString();
+        row.factorType = q.value(3).toString();
+        row.windowDays = q.value(4).toInt();
+        row.lagPeriods = q.value(5).toInt();
+        row.covariance = q.value(6).toDouble();
+        row.correlation = q.value(7).toDouble();
+        row.pValue = q.value(8).toDouble();
+        row.observations = q.value(9).toInt();
+        row.stabilityScore = q.value(10).toDouble();
+        row.computedAt = q.value(11).toString();
+        rows.append(row);
+    }
+
+    return rows;
+}
+
+void DatabaseManager::seedIndicatorDefinitions()
+{
+    const QStringList candidates = {
+        QStringLiteral(":/python/indicator_definitions.json"),
+        QCoreApplication::applicationDirPath() + QStringLiteral("/python/indicator_definitions.json"),
+        QDir::currentPath() + QStringLiteral("/python/indicator_definitions.json")
+    };
+
+    QByteArray raw;
+    for (const QString& path : candidates) {
+        QFile f(path);
+        if (f.open(QIODevice::ReadOnly)) {
+            raw = f.readAll();
+            break;
+        }
+    }
+    if (raw.isEmpty())
+        return;
+
+    const QJsonDocument doc = QJsonDocument::fromJson(raw);
+    if (!doc.isArray()) {
+        qDebug() << "indicator_definitions.json nie jest tablica JSON";
+        return;
+    }
+
+    QSqlQuery q;
+    q.prepare(R"(
+        INSERT INTO indicator_definitions (
+            indicator_code, name, category, unit, frequency, direction_hint,
+            default_transform, allowed_transforms, preferred_source, fallback_source,
+            priority, active, description, updated_at
+        ) VALUES (
+            :indicator_code, :name, :category, :unit, :frequency, :direction_hint,
+            :default_transform, :allowed_transforms, :preferred_source, :fallback_source,
+            :priority, :active, :description, :updated_at
+        )
+        ON CONFLICT(indicator_code) DO UPDATE SET
+            name = excluded.name,
+            category = excluded.category,
+            unit = excluded.unit,
+            frequency = excluded.frequency,
+            direction_hint = excluded.direction_hint,
+            default_transform = excluded.default_transform,
+            allowed_transforms = excluded.allowed_transforms,
+            preferred_source = excluded.preferred_source,
+            fallback_source = excluded.fallback_source,
+            priority = excluded.priority,
+            active = excluded.active,
+            description = excluded.description,
+            updated_at = excluded.updated_at
+    )");
+
+    const QString now = QDateTime::currentDateTime().toString("yyyy-MM-ddTHH:mm:ss");
+    m_db.transaction();
+    for (const QJsonValue& value : doc.array()) {
+        const QJsonObject obj = value.toObject();
+        const QString code = obj.value("indicator_code").toString().trimmed();
+        const QString name = obj.value("name").toString().trimmed();
+        if (code.isEmpty() || name.isEmpty())
+            continue;
+
+        QJsonArray transforms = obj.value("allowed_transforms").toArray();
+        QStringList transformList;
+        for (const QJsonValue& transform : transforms)
+            transformList << transform.toString();
+
+        q.bindValue(":indicator_code", code);
+        q.bindValue(":name", name);
+        q.bindValue(":category", obj.value("category").toString());
+        q.bindValue(":unit", obj.value("unit").toString());
+        q.bindValue(":frequency", obj.value("frequency").toString());
+        q.bindValue(":direction_hint", obj.value("direction_hint").toString());
+        q.bindValue(":default_transform", obj.value("default_transform").toString());
+        q.bindValue(":allowed_transforms", transformList.join(","));
+        q.bindValue(":preferred_source", obj.value("preferred_source").toString());
+        q.bindValue(":fallback_source", obj.value("fallback_source").toString());
+        q.bindValue(":priority", obj.value("priority").toInt(100));
+        q.bindValue(":active", obj.value("active").toBool(true) ? 1 : 0);
+        q.bindValue(":description", obj.value("description").toString());
+        q.bindValue(":updated_at", now);
+
+        if (!q.exec()) {
+            qDebug() << "Blad seed indicator_definitions:" << q.lastError().text();
+            m_db.rollback();
+            return;
+        }
+    }
+    m_db.commit();
+}
+
+void DatabaseManager::seedCompanyFactorDefinitions()
+{
+    const QStringList candidates = {
+        QStringLiteral(":/python/company_factor_definitions.json"),
+        QCoreApplication::applicationDirPath() + QStringLiteral("/python/company_factor_definitions.json"),
+        QDir::currentPath() + QStringLiteral("/python/company_factor_definitions.json")
+    };
+
+    QByteArray raw;
+    for (const QString& path : candidates) {
+        QFile f(path);
+        if (f.open(QIODevice::ReadOnly)) {
+            raw = f.readAll();
+            break;
+        }
+    }
+    if (raw.isEmpty())
+        return;
+
+    const QJsonDocument doc = QJsonDocument::fromJson(raw);
+    if (!doc.isArray()) {
+        qDebug() << "company_factor_definitions.json nie jest tablica JSON";
+        return;
+    }
+
+    QSqlQuery q;
+    q.prepare(R"(
+        INSERT INTO company_factor_definitions (
+            factor_code, name, category, value_type, unit, frequency, direction_hint,
+            default_transform, allowed_transforms, preferred_source, fallback_source,
+            priority, active, map_layer, edge_enabled, description, updated_at
+        ) VALUES (
+            :factor_code, :name, :category, :value_type, :unit, :frequency, :direction_hint,
+            :default_transform, :allowed_transforms, :preferred_source, :fallback_source,
+            :priority, :active, :map_layer, :edge_enabled, :description, :updated_at
+        )
+        ON CONFLICT(factor_code) DO UPDATE SET
+            name = excluded.name,
+            category = excluded.category,
+            value_type = excluded.value_type,
+            unit = excluded.unit,
+            frequency = excluded.frequency,
+            direction_hint = excluded.direction_hint,
+            default_transform = excluded.default_transform,
+            allowed_transforms = excluded.allowed_transforms,
+            preferred_source = excluded.preferred_source,
+            fallback_source = excluded.fallback_source,
+            priority = excluded.priority,
+            active = excluded.active,
+            map_layer = excluded.map_layer,
+            edge_enabled = excluded.edge_enabled,
+            description = excluded.description,
+            updated_at = excluded.updated_at
+    )");
+
+    const QString now = QDateTime::currentDateTime().toString("yyyy-MM-ddTHH:mm:ss");
+    m_db.transaction();
+    for (const QJsonValue& value : doc.array()) {
+        const QJsonObject obj = value.toObject();
+        const QString code = obj.value("factor_code").toString().trimmed();
+        const QString name = obj.value("name").toString().trimmed();
+        if (code.isEmpty() || name.isEmpty())
+            continue;
+
+        QJsonArray transforms = obj.value("allowed_transforms").toArray();
+        QStringList transformList;
+        for (const QJsonValue& transform : transforms)
+            transformList << transform.toString();
+
+        q.bindValue(":factor_code", code);
+        q.bindValue(":name", name);
+        q.bindValue(":category", obj.value("category").toString());
+        q.bindValue(":value_type", obj.value("value_type").toString("numeric"));
+        q.bindValue(":unit", obj.value("unit").toString());
+        q.bindValue(":frequency", obj.value("frequency").toString());
+        q.bindValue(":direction_hint", obj.value("direction_hint").toString());
+        q.bindValue(":default_transform", obj.value("default_transform").toString());
+        q.bindValue(":allowed_transforms", transformList.join(","));
+        q.bindValue(":preferred_source", obj.value("preferred_source").toString());
+        q.bindValue(":fallback_source", obj.value("fallback_source").toString());
+        q.bindValue(":priority", obj.value("priority").toInt(100));
+        q.bindValue(":active", obj.value("active").toBool(true) ? 1 : 0);
+        q.bindValue(":map_layer", obj.value("map_layer").toBool(false) ? 1 : 0);
+        q.bindValue(":edge_enabled", obj.value("edge_enabled").toBool(true) ? 1 : 0);
+        q.bindValue(":description", obj.value("description").toString());
+        q.bindValue(":updated_at", now);
+
+        if (!q.exec()) {
+            qDebug() << "Blad seed company_factor_definitions:" << q.lastError().text();
+            m_db.rollback();
+            return;
+        }
+    }
+    m_db.commit();
 }
 
 QList<Goal> DatabaseManager::getLongTermGoals(const QString& afterDate)
