@@ -7,6 +7,7 @@
         <file>python/indicator_definitions.json</file>
         <file>python/company_factor_definitions.json</file>
         <file>python/macro_data.py</file>
+        <file>python/instrument_master.py</file>
         <file>python/countries_data.json</file>
         <file>python/regions_data.json</file>
     </qresource>

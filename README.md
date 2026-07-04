@@ -21,6 +21,7 @@ Implemented:
 - Ticker autocomplete for portfolio ticker fields: adding assets, historical reports, and Alpha analysis
 - Local GPW ticker fallback in `python/search.py` for common Polish stocks when searching by company name
 - Instrument Master schema for a refreshable global securities database, including exchanges, instruments, listings, aliases, locations, source mappings, and refresh jobs
+- GPW company importer: `python/instrument_master.py import-gpw <db_path>` loads the official GPW company list into Instrument Master tables
 - Company / Micro Factors dictionary seeded from `python/company_factor_definitions.json`
 - Alpha / Edge Engine MVP in the portfolio panel: computes local factor links through covariance/correlation and stores results in SQLite
 - Indicator dictionary architecture for the edge engine, seeded from `python/indicator_definitions.json`
@@ -114,6 +115,7 @@ Examples:
 - `indicator_definitions.json` contains the V1 economic-factor dictionary used to seed `indicator_definitions`
 - `company_factor_definitions.json` contains the V1 company/micro-factor dictionary for Instrument Master, map layers, micro charts, and future Edge Engine inputs
 - `macro_data.py fetch-pl-nbp <db_path> <start> <end>` imports Polish NBP API data into the standardized macro tables
+- `instrument_master.py import-gpw <db_path>` imports the official GPW company list into `exchanges`, `instruments`, `instrument_listings`, `instrument_aliases`, `instrument_source_mappings`, and `instrument_refresh_jobs`
 - `financial_calculator.py` calculates investment return, stock return with dividends, and real return after inflation
 - `financial_calculator.py exercise <department>` generates finance practice tasks with XP rewards scaled by difficulty; the UI shows `MATEMATYKA FINANSOWA`, `INSTRUMENTY DLUZNE`, `TECHNIKI NOTOWAN GIELDOWYCH`, `INSTRUMENTY POCHODNE`, `ANALIZA PORTFELOWA`, and `ANALIZA WSKAZNIKOWA I RACHUNKOWOSC` mixes by default and can expand into concrete task types
 - The debt-instruments mix starts with loan installments, zero-coupon bonds, coupon bond pricing, YTM, Macaulay duration, modified duration, and convexity
